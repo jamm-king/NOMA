@@ -1,88 +1,90 @@
-# NOMA 요구사항 및 설계 기준
+# NOMA Requirements and Design Guidelines
 
-- 작성일: 2026-10-15 (Asia/Seoul)
-- 문서 상태: 초기 버전 요구사항 및 구현 기준 확정
-- 프로젝트명: NOMA / 노마
-- 데이터베이스: MySQL
-- 선택된 디자인: 두 번째 시안 — 다크 터미널
+- Written: 2026-10-15 (Asia/Seoul)
+- Status: Initial release requirements and implementation baseline finalized
+- Project: NOMA
+- Database: MySQL
+- Selected design: Second concept — Dark Terminal
 
-이 문서는 NOMA의 제품 요구사항을 정의한다. 남아 있던 구현 선택은 [v1 구현 결정서](docs/V1-DECISIONS.md)로 확정했으며, 세부 기술·인증·수명 주기·API·운영 정책은 해당 문서를 따른다. 물리 스키마는 [MySQL 초기 DDL](docs/schema.mysql.sql)에 정의한다. 구현·배포·표준 호환성 검증이 완료되었다는 의미는 아니다.
+This document defines NOMA's product requirements. Outstanding implementation choices are finalized in the [v1 Implementation Decisions](docs/V1-DECISIONS.md), which governs technical details, authentication, lifecycles, APIs, and operations. The physical schema is defined in the [Initial MySQL DDL](docs/schema.mysql.sql). This does not mean implementation, deployment, or standards interoperability has been verified.
 
-## 1. 프로젝트 목적
+## 1. Project Purpose
 
-NOMA는 현실 신원을 제공하지 않고 사용할 수 있는 가상 개인정보를 생성·발급·관리하는 독립적인 시스템이다. 사용자는 가상의 개인을 만들고 고유 등록번호를 발급받는다. 외부 시스템은 이 정보와 등록번호를 자신의 목적에 맞게 활용할 수 있다.
+NOMA is an independent system for creating, issuing, and managing fictional personal information without requiring a real-world identity. Users create fictional identities and receive unique registration numbers. External systems can use that information and those identifiers for their own purposes.
 
-이 프로젝트의 중심은 가상 개인정보 시스템 자체다. 사용자가 발급받은 정보를 어떻게 활용하고, 외부 개발자가 그 위에 어떤 시스템을 만드는지 살펴보는 실험적인 컨셉이다.
+The fictional identity system itself is the focus of this project. It is an experimental concept exploring how users use issued information and what external developers build on top of it.
 
-SNS는 활용 가능성을 보여주는 예시이며, NOMA의 핵심 제품이나 필수 구성 요소가 아니다. 외부 시스템에서 NOMA 정보로 회원가입하는 것도 활용 사례 중 하나다.
+NOMA targets users and developers worldwide. English is the default product language; v1 ships English UI and documentation rather than assuming a Korean audience. Interface language does not restrict the scripts used in user profile information.
 
-## 2. 확정된 핵심 원칙
+A social network is an example application, not NOMA's core product or a required component. Signing up for an external service with NOMA information is another example use case.
 
-### 2.1 발급 시스템의 독립성
+## 2. Core Principles
 
-- NOMA는 외부 서비스의 존재를 몰라도 기능해야 한다.
-- 외부 서비스를 NOMA에 사전 등록하거나 연동 승인받게 하지 않는다.
-- 서비스별 ID를 발급하지 않는다. 외부에서는 공통 `noma_id`를 사용한다.
-- 외부 서비스 목록, 가입 내역, 사용처, 제출·승인 이력을 발급 시스템에서 관리하지 않는다.
-- 외부 활용 규격과 검증 방법을 공개하여 활용 가능성을 열어둔다.
-- 외부 서비스에 제출하는 과정은 사용자 지갑과 외부 서비스 사이에서 수행한다.
+### 2.1 Independence of the Issuing System
 
-여기서 외부 서비스의 식별자를 사용자 지갑이 확인하는 것과 발급 시스템이 외부 서비스를 관리하는 것은 구분한다. 제출 요청의 대상 확인은 지갑에서 수행하며 발급 서버에 전달하지 않는다.
+- NOMA must function without knowing that external services exist.
+- External services do not need to register with NOMA or obtain integration approval.
+- Do not issue service-specific IDs. External services use the common `noma_id`.
+- The issuing system does not maintain external service lists, signup records, usage destinations, or presentation and approval histories.
+- Publish integration specifications and verification methods to enable external use.
+- Presentations to external services take place between the user's wallet and the external service.
 
-### 2.2 가상 정보와 익명성
+A wallet checking an external service's identity is distinct from the issuing system managing external services. The wallet checks the presentation request's intended recipient without sending that information to the issuer server.
 
-- 실명, 실제 이메일, 실제 전화번호 등의 현실 신원을 발급의 필수 조건으로 요구하지 않는다.
-- 이름·출생년도·사진·이메일은 사용자가 설정하는 가상 정보다.
-- 이메일은 실제 존재하거나 수신 가능한 주소일 필요가 없다.
-- NOMA는 가상 정보가 현실의 사실임을 보증하지 않는다.
-- 가상 출생년도는 실제 연령 증명에 사용할 수 없다.
-- 현실 신원을 수집하지 않는 것과 모든 활동을 추적 불가능하게 만드는 것은 다르다.
-- 동일한 `noma_id`를 여러 곳에서 공개하면 외부에서 활동이 연결될 수 있다. 절대적 익명성이나 추적 불가능성을 보장한다고 표현하지 않는다.
+### 2.2 Fictional Information and Anonymity
 
-### 2.3 정형화된 데이터
+- Issuance must not require real-world identity information such as a legal name, real email address, or real phone number.
+- The name, birth year, photo, and email are fictional information chosen by the user.
+- An email address does not need to exist or receive messages.
+- NOMA does not guarantee that fictional information describes real-world facts.
+- A fictional birth year cannot prove a user's actual age.
+- Avoiding collection of real-world identity information does not make all activity untraceable.
+- Publishing the same `noma_id` in multiple places can allow external parties to correlate activity. Do not claim absolute anonymity or untraceability.
 
-- 모든 가상 개인은 동일한 고정 데이터 구조를 따른다.
-- 사용자가 임의의 필드나 자유 확장 속성을 추가할 수 없다.
-- 메신저 항목은 제공하지 않는다.
-- 소개글, 관심사, 임의 URL 등도 현재 개인정보 구조에 포함하지 않는다.
-- 정보의 구조와 자료형을 검증하되 내용의 현실적 진위는 검증하지 않는다.
-- 정의되지 않은 입력 필드는 거부한다.
+### 2.3 Structured Data
 
-## 3. 공개 데이터 구조
+- Every fictional identity follows the same fixed data structure.
+- Users cannot add arbitrary fields or extensible attributes.
+- Do not provide messenger fields.
+- Biographies, interests, and arbitrary URLs are also outside the current personal information structure.
+- Validate structure and data types, not the real-world truth of the contents.
+- Reject undefined input fields.
 
-프로젝트명 확정에 따라 기존 임시 명칭 `persona_id`는 `noma_id`로 변경한다. API, 데이터베이스, 증명서의 업무 데이터에서 동일한 명칭을 사용한다.
+## 3. Public Data Structure
 
-### 3.1 시스템 메타데이터
+With the project name finalized, the temporary `persona_id` is renamed to `noma_id`. Use this name consistently in APIs, the database, and credential business data.
 
-| 필드 | 자료형 | 규칙 |
+### 3.1 System Metadata
+
+| Field | Type | Rules |
 | --- | --- | --- |
-| `noma_id` | UUID | 무작위 고유 등록번호. 변경·재사용 불가 |
-| `schema_version` | 문자열 | 데이터 규격 버전. 초기값 `1.0` |
-| `revision` | 양의 정수 | 최초 1. 공개 개인정보 수정 시 증가 |
-| `status` | 열거형 문자열 | `active`, `revoked` |
-| `issued_at` | 날짜·시간 | 최초 발급 시각. 변경 불가 |
-| `updated_at` | 날짜·시간 | 마지막 공개 정보 변경 시각 |
+| `noma_id` | UUID | Random unique registration number; immutable and never reused |
+| `schema_version` | String | Data specification version; initially `1.0` |
+| `revision` | Positive integer | Starts at 1; increments when public personal information changes |
+| `status` | Enumerated string | `active`, `revoked` |
+| `issued_at` | Date/time | Initial issuance time; immutable |
+| `updated_at` | Date/time | Most recent public information change |
 
-날짜·시간은 외부 응답에서 UTC 기준 ISO 8601 문자열로 표현한다. 인증키나 증명서 자체의 수명 주기는 개인정보의 `revision`과 구분해서 설계한다.
+External responses express date/time values as UTC ISO 8601 strings. Authentication key and credential lifecycles are designed separately from the personal information `revision`.
 
 ### 3.2 `profile`
 
-| 필드 | 자료형 | 필수 여부 | 규칙 |
+| Field | Type | Required | Rules |
 | --- | --- | --- | --- |
-| `name` | 문자열 | 필수 | 앞뒤 공백 제거 후 1~50자 |
-| `birth_year` | 정수 또는 `null` | 선택 | 1~9999. 실제 연령 증명 아님 |
-| `photo_id` | UUID 또는 `null` | 선택 | 업로드된 사진 자산 참조 |
-| `email` | 문자열 또는 `null` | 선택 | 최대 254자. 형식·존재·수신 가능 여부 검증 없음 |
+| `name` | String | Yes | 1–50 characters after trimming leading and trailing whitespace |
+| `birth_year` | Integer or `null` | No | 1–9999; does not prove actual age |
+| `photo_id` | UUID or `null` | No | Reference to an uploaded photo asset |
+| `email` | String or `null` | No | Up to 254 characters; no format, existence, or deliverability validation |
 
-- 선택 항목을 설정하지 않으면 `null`을 사용한다.
-- 활성 상태의 공개 응답에는 네 필드를 항상 포함한다.
-- 선택 항목의 빈 문자열은 `null`로 정규화한다.
-- 이름·이메일 중복은 허용한다. `noma_id`만 고유하다.
-- 문자열은 일반 텍스트로 취급하고 HTML을 실행하지 않는다.
-- 사진은 임의 외부 URL 대신 시스템의 사진 자산 ID를 참조한다.
-- 문자열은 앞뒤 공백 제거 후 NFC로 정규화하며 Unicode 코드 포인트 수로 길이를 검사한다.
+- Use `null` for unset optional fields.
+- Public responses for active identities always include all four fields.
+- Normalize empty strings in optional fields to `null`.
+- Duplicate names and emails are allowed. Only `noma_id` is unique.
+- Treat strings as plain text; do not execute HTML.
+- Photos reference system asset IDs rather than arbitrary external URLs.
+- Trim leading and trailing whitespace, normalize strings to NFC, and validate length by Unicode code point count.
 
-### 3.3 공개 응답 예시
+### 3.3 Example Public Response
 
 ```json
 {
@@ -93,7 +95,7 @@ SNS는 활용 가능성을 보여주는 예시이며, NOMA의 핵심 제품이�
   "issued_at": "2026-10-15T05:00:00Z",
   "updated_at": "2026-10-15T05:00:00Z",
   "profile": {
-    "name": "하루",
+    "name": "Haru",
     "birth_year": 2001,
     "photo_id": null,
     "email": "haru@example.invalid"
@@ -101,194 +103,205 @@ SNS는 활용 가능성을 보여주는 예시이며, NOMA의 핵심 제품이�
 }
 ```
 
-폐기된 등록번호는 재사용하지 않는다. 공개 응답의 최상위 구조는 유지하되 `status`를 `revoked`, `profile`을 `null`로 반환한다. 폐기 시 현재 개인정보를 즉시 제거하고 사진 등 관련 자산을 24시간 이내 정리한다. 최소 tombstone은 영구 보존하며 세부 보존 정책은 v1 결정서를 따른다.
+Never reuse revoked registration numbers. Preserve the top-level public response structure, but return `status` as `revoked` and `profile` as `null`. Remove current personal information immediately upon revocation and clean up related assets, including photos, within 24 hours. Retain a minimal tombstone permanently; follow the v1 decisions for detailed retention rules.
 
-## 4. MySQL 저장 구조
+## 4. MySQL Storage Structure
 
-MySQL을 사용하며 자유 확장용 JSON 컬럼을 두지 않는다. 업무 항목과 인증 메타데이터는 명시적인 컬럼 및 관계로 정의한다. API나 증명서가 JSON 형식인 것과 DB에 JSON 컬럼을 사용하는 것은 별개다.
+Use MySQL without JSON columns for arbitrary extensibility. Model business fields and authentication metadata as explicit columns and relationships. JSON in an API or credential does not imply JSON storage in the database.
 
-아래는 논리적인 데이터 분류다. 물리 테이블과 제약은 `docs/schema.mysql.sql`로 정의한다. MySQL 8.4 LTS, InnoDB, utf8mb4, UTC를 사용한다.
+The following are logical data categories. Physical tables and constraints are defined in `docs/schema.mysql.sql`. Use MySQL 8.4 LTS, InnoDB, utf8mb4, and UTC.
 
-| 데이터 분류 | 내용 |
+| Data category | Contents |
 | --- | --- |
-| 가상 개인정보 | `noma_id`, 개인정보 네 항목, 규격·버전·상태·시각 |
-| 사진 자산 | 사진 ID, 저장 위치, 파일 형식·크기 등 |
-| 관리 인증 | 관리 인증 자격 증명, 복구 코드 검증용 해시 등 |
-| 소유 증명용 공개키 | NOMA와 연결된 공개키, 키 상태 및 수명 주기 |
-| 증명서 발급 내역 | 증명서 식별자, 정보 버전, 발급·만료·폐기 정보 |
+| Fictional personal information | `noma_id`, four profile fields, schema, revision, status, and timestamps |
+| Photo assets | Photo IDs, storage locations, formats, sizes, and related metadata |
+| Management authentication | Management credentials and recovery code verification hashes |
+| Holder public keys | Public keys linked to NOMA identities, key status, and lifecycles |
+| Credential issuance records | Credential identifiers, profile revisions, issuance, expiration, and revocation data |
 
-- 사진 파일은 별도 저장소에 두고 MySQL에는 참조 정보를 저장한다.
-- 사용자 소유 증명용 개인키는 발급 서버나 MySQL에 저장하지 않는다.
-- 발급기관의 서명용 개인키는 서버 측에서 보호하며 일반 업무 테이블에 원문으로 저장하지 않는다.
-- 외부 서비스 등록 테이블과 서비스별 ID 매핑 테이블은 만들지 않는다.
-- 서명된 SD-JWT 직렬화 바이트는 증명서 테이블의 BLOB에 저장한다. 공개 개인정보의 자유 확장 JSON 컬럼은 사용하지 않는다. 증명서 원본은 만료+7일 후 삭제한다.
+- Store photo files separately; keep references in MySQL.
+- Never store holder private keys on the issuer server or in MySQL.
+- Protect issuer signing private keys on the server; never store plaintext keys in ordinary business tables.
+- Do not create external service registration or service-specific ID mapping tables.
+- Store signed SD-JWT serialization bytes in a credential table BLOB. Do not use extensible JSON columns for public profile information. Delete credential bytes seven days after expiration.
 
-## 5. 증명서의 역할
+## 5. Purpose of Credentials
 
-증명서는 다음 사실을 확인하는 수단이다.
+A credential establishes the following:
 
-> 해당 가상 개인정보와 소유 증명용 공개키의 연결을 NOMA가 특정 시점에 발급했으며, 서명된 내용이 변조되지 않았다.
+> NOMA issued an association between fictional personal information and a holder public key at a specific time, and the signed contents have not been altered.
 
-| 검증 대상 | 증명서만으로 확인 가능 여부 |
+| Verification target | Can the credential alone establish it? |
 | --- | --- |
-| NOMA 발급 출처 | 가능. 신뢰한 NOMA 공개키로 검증 |
-| 서명된 내용의 변조 여부 | 가능 |
-| 정보가 현실의 사실인지 | 보증하지 않음 |
-| 이메일이 수신 가능한지 | 보증하지 않음 |
-| 현재도 유효하고 최신인지 | 별도 상태·버전 확인 필요 |
-| 제출자가 연결된 개인키를 제어하는지 | 별도의 소유 증명 필요 |
+| Issuance by NOMA | Yes, when verified with a trusted NOMA public key |
+| Integrity of signed contents | Yes |
+| Real-world truth of the information | Not guaranteed |
+| Email deliverability | Not guaranteed |
+| Current validity and latest revision | Requires separate status and revision checks |
+| Presenter's control of the bound private key | Requires separate proof of possession |
 
-증명서 파일은 복사될 수 있으므로 파일 소지만으로 회원가입·로그인 소유권을 인정하지 않는다. 소유 증명도 현실 인물의 신원을 확인하거나 한 사람당 하나의 NOMA임을 증명하는 절차는 아니다.
+Credential files can be copied. Possession of a file alone must not establish ownership for signup or login. Proof of possession also does not identify a real-world person or prove that a person has only one NOMA identity.
 
-증명서는 특정 시점의 정보이므로 발급 후 변경하지 않는다. 개인정보 수정 시 새 버전의 증명서를 발급한다. 과거 증명서의 서명이 맞는 것과 현재 유효한 것은 구분한다.
+Credentials describe information at a point in time and are immutable after issuance. Issue a credential for the new revision when personal information changes. A valid signature on an old credential is distinct from current validity.
 
-사진 자산은 덮어쓰지 않고 교체 시 새 ID를 발급한다. 저장된 WebP 바이트의 SHA-256을 별도의 고정 증명서 항목으로 연결한다. 기존 `profile` 구조는 유지한다.
+Photo assets are never overwritten; replacements receive new IDs. Bind the SHA-256 digest of the stored WebP bytes through a separate fixed credential claim. Preserve the existing `profile` structure.
 
-## 6. OpenID4VP 기반 소유 증명
+## 6. OpenID4VP-Based Proof of Possession
 
-### 6.1 확정된 방향
+### 6.1 Selected Approach
 
-증명서 제출과 소유 증명은 OpenID for Verifiable Presentations 1.0을 기준으로 설계한다. 암호학적 원리를 이용한 임의 프로토콜을 새로 정의하는 대신 기존 표준의 요청·응답 및 검증 절차를 따른다.
+Design credential presentations and proof of possession around OpenID for Verifiable Presentations 1.0. Follow its request, response, and verification procedures rather than inventing a custom cryptographic protocol.
 
-OpenID4VP는 제출 프로토콜이다. 증명서 형식, 최초 발급 프로토콜, 키 복구 정책 전체를 자동으로 결정해주는 것은 아니다.
+OpenID4VP is a presentation protocol. It does not automatically determine the credential format, initial issuance protocol, or complete key recovery policy.
 
-### 6.2 역할
+### 6.2 Roles
 
-| 구성 | 역할 |
+| Component | Responsibilities |
 | --- | --- |
-| NOMA 발급 시스템 | 개인정보 관리, 증명서 서명·발급, 공개키·상태 정보 제공 |
-| 사용자 지갑 | 개인키 생성·보관, 증명서 보관, 요청 검증, 승인 및 소유 증명 생성 |
-| 외부 검증자 | 정보 제출 요청, 발급 출처·소유 증명 검증, 자체 업무 처리 |
+| NOMA issuing system | Manage profiles, sign and issue credentials, provide public keys and status information |
+| User wallet | Generate and store private keys, store credentials, validate requests, obtain approval, and generate proof of possession |
+| External verifier | Request information, verify issuer authenticity and proof of possession, and handle its own business logic |
 
-사용자 지갑이 외부 서비스와 직접 통신한다. 같은 NOMA 브랜드로 제공할 수 있으나 발급 서버와 책임 및 데이터 흐름을 분리한다.
+The wallet communicates directly with external services. It may share NOMA branding, but its responsibilities and data flows are separate from the issuer server.
 
-### 6.3 제출 흐름
+### 6.3 Presentation Flow
 
-1. 사용자 기기에서 소유 증명용 키 쌍을 생성한다.
-2. NOMA는 사용자 공개키와 개인정보를 연결한 증명서를 발급한다.
-3. 외부 서비스가 필요한 정보와 예측하기 어려운 일회용 값(`nonce`)을 포함해 제출 요청을 만든다.
-4. 지갑은 요청 출처와 응답 목적지를 검증하고 제출할 NOMA 및 요청 항목을 표시한다.
-5. 사용자가 승인하면 지갑이 개인키로 해당 요청에 연결된 소유 증명을 생성한다.
-6. 지갑이 외부 서비스에 증명서와 소유 증명을 직접 제출한다.
-7. 외부 서비스가 발급기관 서명, 사용자 키 소유 증명, 대상·일회용 값·시각·세션 연결을 검증한다.
-8. 성공한 일회용 값은 다시 사용할 수 없게 처리하고, 외부 서비스가 자체적으로 가입 등을 수행한다.
+1. Generate a holder key pair on the user's device.
+2. NOMA issues a credential binding the user's public key to the profile.
+3. An external service creates a presentation request with required information and an unpredictable one-time `nonce`.
+4. The wallet validates the request source and response destination, then displays the selected NOMA identity and requested fields.
+5. With user approval, the wallet uses the private key to generate proof bound to that request.
+6. The wallet sends the credential and proof directly to the external service.
+7. The external service verifies the issuer signature, holder proof, audience, nonce, time, and session binding.
+8. The verifier prevents reuse of the successful nonce and independently completes signup or other business actions.
 
-NOMA 발급 서버는 외부 서비스명, 제출 요청, 사용자 승인, 가입 사실을 수신하거나 저장하지 않는다. 사용자 개인키를 외부 서비스에 전달하지 않는다.
+The NOMA issuer server does not receive or store external service names, presentation requests, user approvals, or signup events. Never disclose the user's private key to an external service.
 
-### 6.4 v1 기술 기준
+### 6.4 v1 Technical Baseline
 
-- 외부 검증자 식별: `x509_san_dns`. 지갑이 요청 서명과 인증서 신뢰 체인을 검증한다. NOMA 사전 등록은 요구하지 않는다.
-- 외부 서비스는 요청 서명에 적절한 인증서와 키를 갖춰야 한다. 모든 HTTPS 인증서가 곧바로 해당 용도에 적합하다고 가정하지 않는다.
-- 증명서: SD-JWT RFC 9901 및 SD-JWT VC draft-19. format은 `dc+sd-jwt`.
-- 상태: Token Status List draft-21. 초안 규격은 최종 표준이라고 표기하지 않는다.
-- 사용자 공개키는 고정 `cnf.jwk` 영역에 연결하며 발급기관과 소유 증명 서명은 ES256을 사용한다.
-- 공개 개인정보 객체는 고정 `noma` claim 아래에 넣고 `profile` 네 항목은 선택 공개를 지원한다. 공개 조회 API의 공개 범위는 바뀌지 않는다.
-- DCQL로 요청하고 소유키 바인딩을 필수로 한다. 응답은 `direct_post.jwt`와 ECDH-ES/A256GCM 암호화를 사용한다.
-- 회원가입 등 소유 확인이 필요한 요청은 암호학적 소유 증명을 필수로 한다.
-- NOMA 공개키는 외부 검증자가 신뢰한 배포 경로로 확보한다. 증명서가 임의로 제공한 키를 그대로 신뢰하지 않는다.
-- 최초 발급은 NOMA 전용 `/api/v1` API를 사용한다. v1에서는 OpenID4VCI를 구현하지 않는다.
-- 인증서·요청·응답·키 및 세션 검증의 상세 조건은 v1 결정서를 따른다.
+- External verifier identification: `x509_san_dns`. The wallet verifies the request signature and certificate trust chain. NOMA preregistration is not required.
+- External services must have a certificate and key suitable for request signing. Do not assume every HTTPS certificate is suitable.
+- Credentials: SD-JWT RFC 9901 and SD-JWT VC draft-19; format `dc+sd-jwt`.
+- Status: Token Status List draft-21. Do not describe draft specifications as final standards.
+- Bind the holder public key in the fixed `cnf.jwk` field. Use ES256 for issuer and holder proof signatures.
+- Place the public data object under the fixed `noma` claim. Support selective disclosure of the four `profile` fields without changing public lookup visibility.
+- Use DCQL and require holder binding. Responses use `direct_post.jwt` with ECDH-ES/A256GCM encryption.
+- Requests requiring ownership verification, including signup, must require cryptographic proof of possession.
+- External verifiers obtain NOMA public keys through a trusted distribution path. Never blindly trust a key supplied by a credential.
+- Initial issuance uses NOMA-specific `/api/v1` endpoints. v1 does not implement OpenID4VCI.
+- Follow the v1 decisions for detailed certificate, request, response, key, and session validation conditions.
 
-### 6.5 상태 확인과 키 관리
+### 6.5 Status Checks and Key Management
 
-- 발급 출처와 소유 증명은 외부에서 자체 검증할 수 있도록 한다.
-- 최신 버전·폐기·키 교체 상태는 별도 상태 정보로 확인한다.
-- 개별 제출 흔적을 줄이기 위해 서명된 Token Status List를 묶음 단위로 배포하고 외부에서 캐시한다.
-- 서명 유효성, 증명서 만료, 현재 폐기 상태, 개인정보 최신 여부는 구분한다.
-- 복구나 키 교체 시 기존 키와 증명서의 유효 상태도 함께 갱신해야 한다.
-- 증명서는 30일간 유효하며 개인정보 수정·갱신·키 교체·복구·폐기 시 기존 증명서를 폐기한다. 유효 증명서는 NOMA당 하나다.
-- 상태 최신성 허용 범위는 120초이며 신선한 상태를 확인하지 못하면 가입·인증을 거부한다.
-- 복구는 256비트 단회용 코드로 새 관리 패스키와 소유키를 등록하는 방식이다. 기존 인증·소유키·증명서는 폐기한다.
-- 패스키 분실 복구에서는 복구 코드 검증이 최근 패스키 재인증을 대신한다. 제한 복구 세션은 새 인증 수단 등록·복구 완료에만 사용하며 일반 관리·증명서 다운로드를 허용하지 않는다. 복구 코드는 완료 시 원자적으로 소비한다.
+- Allow external parties to verify issuer authenticity and proof of possession independently.
+- Check current revision, revocation, and key replacement through separate status information.
+- Distribute signed Token Status Lists in batches for verifier caching to reduce individual presentation traces.
+- Distinguish signature validity, credential expiration, current revocation status, and profile freshness.
+- Recovery and key replacement must also update the validity of old keys and credentials.
+- Credentials are valid for 30 days. Profile changes, renewal, key replacement, recovery, and NOMA revocation revoke existing credentials. Keep only one valid credential per NOMA identity.
+- Allow status information at most 120 seconds old. Reject signup and authentication when fresh status cannot be confirmed.
+- Recovery uses a 256-bit single-use code to register a new management passkey and holder key. Revoke previous authentication methods, holder keys, and credentials.
+- When a passkey is lost, recovery code verification replaces recent passkey reauthentication. A restricted recovery session permits only replacement setup and recovery completion, not ordinary management or credential downloads. Consume the recovery code atomically at completion.
 
-패스키/WebAuthn은 NOMA 관리 화면의 인증 수단으로 사용하며, 임의의 외부 서비스에 공통 개인키로 서명하는 수단과 구분한다. 관리 인증키와 소유 증명키의 역할을 혼동하지 않는다.
+Passkeys/WebAuthn authenticate access to NOMA management. They are distinct from using a common private key to sign presentations to arbitrary external services. Do not confuse management keys with holder keys.
 
-## 7. 웹앱 화면 기준
+## 7. Web Application Screens
 
-웹앱의 중심은 가상 개인을 발급받고 관리하는 디지털 발급소다. 아래 화면을 v1 범위로 한다. 관리 웹앱은 Next.js, 지갑은 별도 origin의 설치 가능한 PWA로 제공한다.
+The web application is a digital issuing office for creating and managing fictional identities. The following screens are in v1 scope. Use Next.js for the management application and an installable PWA on a separate origin for the wallet.
 
-| 화면 | 주요 기능 |
+| Screen | Main features |
 | --- | --- |
-| 홈 | 서비스 소개, 발급 시작, 기존 NOMA 관리 진입 |
-| 발급 | 네 가지 개인정보 입력, 카드 미리보기, 공개 범위 안내 |
-| 발급 완료 | 완성된 카드, 등록번호 복사, 증명서 받기, 관리 진입 |
-| 내 NOMA | 개인정보 수정, 버전 확인, 증명서 관리, 인증·복구, 폐기 |
-| 공개 조회 | 정확한 `noma_id`로 현재 공개 정보 및 상태 조회 |
-| 개발자 문서 | 데이터 규격, 조회 API, 공개키, OpenID4VP 검증·연동 예제 |
-| 지갑 제출 승인 | 요청 출처, 제출할 NOMA 및 항목을 확인하고 승인·거절 |
+| Home | Service introduction, start issuance, open existing NOMA management |
+| Issuance | Enter four profile fields, preview the card, explain public visibility |
+| Issuance complete | Completed card, copy registration number, receive credential, open management |
+| My NOMA | Edit profile, inspect revision, manage credentials, authentication, recovery, and revocation |
+| Public lookup | Retrieve current public information and status by exact `noma_id` |
+| Developer documentation | Data specification, lookup API, public keys, OpenID4VP verification and integration examples |
+| Wallet presentation approval | Review request source, selected identity, and requested fields; approve or reject |
 
-### 7.1 발급 흐름
+### 7.1 Issuance Flow
 
-발급 시작 → 개인정보 입력 → 공개 내용 확인 → 관리 인증·복구 설정 → 최종 발급 → 완료 화면.
+Start issuance → enter profile → review public information → configure management authentication and recovery → finalize issuance → completion screen.
 
-- 발급 전에는 등록번호를 실제 발급된 것처럼 표시하지 않는다.
-- 입력 정보가 등록번호로 공개 조회된다는 사실을 최종 발급 전에 명확히 안내한다.
-- 가상 이메일을 계정 복구 주소로 간주하지 않는다.
-- 등록번호는 공유 가능하지만 비밀키·복구 코드는 카드와 공개 응답에 넣지 않는다.
-- 발급 intent, idempotency key, DB 트랜잭션과 상태 게시 outbox로 중복·부분 발급을 방지한다. 커밋·게시 완료 전 증명서를 반환하지 않는다.
-- 서버 발급 완료와 지갑 저장 완료를 구분한다. 관리 화면이 대상 ID와 5분짜리 일회용 수령 토큰을 검증한 지갑 창에 전달하고, 지갑은 연결된 소유키로 challenge에 서명해 증명서를 직접 받는다. 응답 유실·저장 실패 시 같은 증명서의 새 수령 토큰으로 재시도하며 재발급하지 않는다. 세부 인증·통신·정리 기준은 v1 결정서 6.1절을 따른다.
+- Never display a registration number as issued before issuance actually completes.
+- Clearly explain before final issuance that the entered information is publicly retrievable by registration number.
+- Do not treat the fictional email as a recovery address.
+- Registration numbers can be shared, but private keys and recovery codes must never appear on cards or in public responses.
+- Prevent duplicate or partial issuance with issuance intents, idempotency keys, DB transactions, and a status publication outbox. Never return credentials before commit and publication complete.
+- Distinguish server issuance completion from wallet storage completion. The management screen sends target IDs and a five-minute single-use receipt token to the validated wallet window. The wallet signs a challenge with the bound holder key and receives the credential directly. After a lost response or storage failure, retry receipt of the same credential with a new token rather than reissuing it. Follow Section 6.1 of the v1 decisions for authentication, communication, and cleanup details.
 
-### 7.2 관리·조회 화면
+### 7.2 Management and Lookup Screens
 
-- 현재 정보 버전과 증명서에 담긴 버전 차이를 보여준다.
-- 폐기 전에 결과를 안내하고 최종 확인한다.
-- 공개 조회는 정확한 등록번호 입력만 지원한다.
-- 이름 검색과 전체 등록자 목록은 첫 버전에서 제공하지 않는다.
-- 지갑 제출 기록은 v1에서 저장하지 않는다.
-- 지갑은 별도 origin의 PWA이며 개인키는 브라우저 IndexedDB에 비추출 키로 저장한다. 기기 간 소유키 복제·동기화는 v1에서 제외한다.
+- Display differences between the current profile revision and the revision in a credential.
+- Explain revocation consequences and obtain final confirmation.
+- Public lookup accepts only an exact registration number.
+- The first release does not provide name search or a list of all registered identities.
+- v1 does not store wallet presentation history.
+- The wallet is a PWA on a separate origin. Store private keys as non-extractable keys in browser IndexedDB. Cross-device holder key copying and synchronization are outside v1 scope.
 
-## 8. 확정된 디자인 컨셉
+### 7.3 Language and International Use
 
-사용자가 제시한 방향은 사이버·스틸·메타버스이며 AI 특유의 그라데이션은 사용하지 않는다. 생성된 세 시안 중 두 번째 시안을 선택했다.
+- English is the default and the only shipped UI language in v1 for the issuer application, wallet, public lookup, and developer documentation. Use English labels, help, validation errors, consent text, recovery guidance, and accessibility text.
+- Keep UI messages separate from business logic so translations can be added later. v1 does not display a language selector for unavailable translations or automatically switch to Korean based on browser settings.
+- Continue accepting Unicode profile values under the existing normalization and length rules. Do not translate user-entered names or require an English name, country, nationality, phone number, or real-world location.
+- Store and exchange timestamps in UTC. Display human-facing dates in English using the browser's time zone, label the time zone, and offer the exact UTC timestamp for technical inspection. Do not default product displays to Asia/Seoul or show ambiguous numeric-only dates.
+- Follow Section 10.4 of the v1 decisions for text direction, formatting, and future localization boundaries.
 
-선택 기준 이미지는 `docs/assets/noma-dark-terminal-concept.png`에 보관한다. 이 이미지는 시각적 기준이며 데이터 제약과 동작 명세보다 우선하지 않는다.
+## 8. Selected Design Concept
 
-| 요소 | 기준 |
+The requested direction is cyber, steel, and metaverse, without stereotypical AI gradients. The second of three generated concepts was selected.
+
+The visual reference is stored at `docs/assets/noma-dark-terminal-concept.png`. It is a visual guide and does not override data constraints or behavioral specifications.
+
+The original concept contains Korean text. Preserve it as a design reference, but implement all product copy in English according to the language policy and the v1 decisions.
+
+| Element | Guideline |
 | --- | --- |
-| 전체 인상 | 검은 스틸 표면에 정밀하게 새겨진 가상 신분 시스템 |
-| 배경 | 검정에 가까운 차콜, 은은한 금속 질감 |
-| 글자 | 밝은 실버, 보조 설명은 회색 |
-| 강조색 | 라임색. 주요 버튼과 선택 상태에 제한적으로 사용 |
-| 구조 | 정렬된 격자, 번호가 붙은 입력 항목, 얇은 구분선 |
-| 형태 | 각진 모서리, 절제된 테두리 |
-| 글꼴 | 읽기 쉬운 고딕체, ID·기술 정보는 고정폭 글꼴 |
-| 카드 | 세로형 금속 신분증, 사진과 등록번호 중심 |
+| Overall impression | A fictional identity system precisely engraved into black steel |
+| Background | Near-black charcoal with subtle metallic texture |
+| Text | Bright silver with gray supporting text |
+| Accent | Lime, limited to primary buttons and selected states |
+| Structure | Aligned grid, numbered inputs, thin dividers |
+| Shape | Angular corners and restrained borders |
+| Typography | Readable sans-serif; monospace for IDs and technical information |
+| Card | Vertical metal identity card emphasizing the photo and registration number |
 
-- 그라데이션과 네온 발광 효과는 제외한다.
-- 금속 질감이 글자·입력 요소의 가독성을 해치지 않도록 한다.
-- 메타버스 느낌은 아바타와 가상 신분증으로 표현한다.
-- 시안의 아바타는 예시이며 특정 사진 스타일이나 아바타 사용을 강제하지 않는다.
-- 시안의 이메일 설명은 실제 설계에서 “가상 정보이며 수신 여부를 확인하지 않음”으로 수정한다.
-- 디자인 시안에 포함된 문구·파일 제한·장식은 확정 요구사항이 아니다.
-- 색상값, 글꼴, 간격, 반응형 배치와 접근성 목표는 v1 결정서 10절의 디자인 토큰을 따른다.
+- Exclude gradients and neon glow effects.
+- Metallic texture must not reduce text or input readability.
+- Express the metaverse theme through avatars and fictional identity cards.
+- The reference avatar is illustrative; do not require a particular photo style or avatar.
+- Replace the reference's email description with wording explaining that the information is fictional and deliverability is not checked.
+- Copy, file restrictions, and decorative details in the concept image are not finalized requirements.
+- Follow the design tokens in Section 10 of the v1 decisions for colors, fonts, spacing, responsive layout, and accessibility targets.
 
-## 9. 개인정보 보호 및 운영 설계 방향
+## 9. Privacy and Operational Design
 
-- 발급에 불필요한 현실 개인정보를 수집하지 않는다.
-- 이미지는 JPEG·PNG·정적 WebP, 최대 5MiB를 입력으로 받아 정사각형 WebP로 재인코딩하며 위치 정보 등 메타데이터를 제거한다.
-- 로그에 인증 비밀·복구 코드·불필요한 프로필 원문을 남기지 않는다.
-- 지갑의 제출 과정과 이용처 정보를 발급 시스템 분석·로그로 전송하지 않는다.
-- 공개 조회·키 배포·상태 배포에서도 접근 기록이 생길 수 있으므로 “모든 외부 이용을 알 수 없다”는 과도한 기술적 보장은 하지 않는다.
-- 오류 로그 7일, 최소 관리 감사 30일, 암호화 백업 7일 보존을 기본으로 한다. 원문 IP·User-Agent·Referer·개인정보·인증 비밀·이용처는 영속 로그에 남기지 않는다.
-- 보안 무효화 기록은 일반 감사와 별도로 운영 DB·백업과 독립된 암호화 저장소에 보존한다. 성공 응답 및 관련 상태 게시 전에 외부 기록을 확인한다. NOMA tombstone·issuer 키 신뢰 철회는 영구 보존하고, 그 밖의 최소 무효화 식별자는 v1 결정서 9.1절의 기간 동안 보존한다. 프로필 원문·인증 비밀·이용처는 기록하지 않는다.
-- 일반 데이터의 복구 시점 목표는 최대 24시간, 성공 응답한 보안 무효화의 데이터 손실 목표는 0이다. 별도 저장소까지 함께 소실된 경우는 보장 범위에 포함하지 않는다. 복원 시 무효화를 재적용하고 모든 세션·임시 토큰·기존 증명서를 무효화한 뒤 새 상태 목록을 게시한다. 기록의 완전성을 확인하지 못하면 서비스를 재개하지 않는다. 백업 이후 새 인증 수단을 잃은 NOMA는 기존 권한을 되살리지 않고 잠근다.
-- v1 결정서의 발급·조회 제한, 파일 디코딩 검사, 삭제 및 상태 배포 정책을 적용한다.
+- Do not collect real-world personal information unnecessary for issuance.
+- Accept JPEG, PNG, and static WebP images up to 5 MiB. Re-encode them as square WebP images and remove metadata such as location data.
+- Never log authentication secrets, recovery codes, or unnecessary profile contents.
+- Do not send wallet presentation flows or usage destinations to issuer analytics or logs.
+- Public lookup, key distribution, and status distribution can generate access records. Do not make the excessive technical claim that all external usage is unknowable.
+- Default retention: error logs seven days, minimal management audit 30 days, encrypted backups seven days. Do not persist raw IP addresses, User-Agent, Referer, personal information, authentication secrets, or usage destinations in logs.
+- Retain security invalidation records separately from ordinary audits in encrypted storage independent of the operational DB and backups. Confirm external recording before success responses and related status publication. Retain NOMA tombstones and issuer key distrust records permanently; retain other minimal invalidation identifiers for the periods in Section 9.1 of the v1 decisions. Do not record profile contents, authentication secrets, or usage destinations.
+- The ordinary data recovery point objective is at most 24 hours; the target data loss for successfully acknowledged security invalidations is zero. Simultaneous loss of the independent store is outside that guarantee. During restoration, replay invalidations, invalidate all sessions, temporary tokens, and existing credentials, and publish new status lists. Do not reopen service without confirming record completeness. Lock identities whose new authentication methods were lost after the backup rather than restoring old authority.
+- Apply the v1 issuance and lookup limits, file decoding checks, deletion rules, and status distribution policy.
 
-## 10. 구현 결정서와 완료 기준
+## 10. Implementation Decisions and Completion Criteria
 
-기존 11개 미정 항목은 `docs/V1-DECISIONS.md`로 정리했다. 프레임워크·배포 구조·DB 버전·UUID·인증·복구·복수 NOMA·지갑·증명서 규격·수명 주기·발급 API·사진·물리 DDL·화면·접근성·운영 정책을 포함한다.
+The previous 11 unresolved items are addressed in `docs/V1-DECISIONS.md`: frameworks, deployment, DB version, UUIDs, authentication, recovery, multiple identities, wallet, credential specifications and lifecycle, issuance APIs, photos, physical DDL, screens, accessibility, and operations.
 
-- 물리 DDL: `docs/schema.mysql.sql`.
-- 실제 운영 도메인, 공급자 계정, 배포 비밀, 설치 시 보안 패치 버전은 배포 설정으로 주입한다.
-- 구현 완료에는 MySQL 8.4 DDL 실행, 발급·복구 트랜잭션, 키 보관, 표준 요청·응답 및 외부 검증 데모 검증이 필요하다.
-- 지갑 수령의 만료·재사용·대상 불일치와 저장 실패 후 재시도, 제한 복구 세션의 권한·동시 소비, 외부 무효화 기록 장애·백업 복원·누락 시 재개 차단을 검증한다. 복구 훈련에서 RPO 충족 여부와 실제 복구 시간을 확인한다.
-- 문서와 DDL을 작성한 현재 상태를 이미 구현·배포·검증된 서비스로 표현하지 않는다.
+- Physical DDL: `docs/schema.mysql.sql`.
+- Inject production domains, provider accounts, deployment secrets, and security patch versions as deployment configuration.
+- Implementation completion requires MySQL 8.4 DDL execution, issuance and recovery transactions, key storage, standard requests and responses, and an external verification demo.
+- Verify wallet receipt expiration, replay and target mismatch rejection, retry after storage failure, restricted recovery permissions and concurrent consumption, external invalidation recording failures, backup restoration, and reopening prevention when records are missing. Recovery drills must check RPO compliance and measure actual recovery time.
+- Verify English copy across all screens and error/approval flows, Unicode and mixed-direction profile display, and correctly labeled date/time formatting across time zones without changing UTC API values.
+- Do not describe the current documentation and DDL as an implemented, deployed, or verified service.
 
-## 11. 참고 규격
+## 11. Reference Specifications
 
 - [OpenID for Verifiable Presentations 1.0 — Final](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html)
-- [OpenID4VP 검증자 식별 방식](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#section-5.9.3)
-- [OpenID4VP의 SD-JWT VC 처리](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#appendix-B.3)
+- [OpenID4VP Verifier Identification](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#section-5.9.3)
+- [OpenID4VP SD-JWT VC Processing](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#appendix-B.3)
 - [JWS — RFC 7515](https://www.rfc-editor.org/rfc/rfc7515)
-- [EdDSA — RFC 8032](https://www.rfc-editor.org/rfc/rfc8032) — 논의한 서명 방식의 참고 자료이며 알고리즘 채택 확정은 아님.
-- [WebAuthn Level 2](https://www.w3.org/TR/webauthn-2/) — 관리 인증과 외부 소유 증명 구분을 위한 참고 자료.
+- [EdDSA — RFC 8032](https://www.rfc-editor.org/rfc/rfc8032) — Reference for a discussed signature method, not confirmation of algorithm adoption.
+- [WebAuthn Level 2](https://www.w3.org/TR/webauthn-2/) — Reference for distinguishing management authentication from external proof of possession.

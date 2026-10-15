@@ -1,377 +1,392 @@
-# NOMA v1 구현 결정서
+# NOMA v1 Implementation Decisions
 
-- 결정일: 2026-10-15 (Asia/Seoul)
-- 적용 범위: 첫 실험 버전
-- 상태: v1 기준 확정. 실제 구현·배포·표준 호환성 검증은 별도 수행한다.
-- 기존 요구사항에 남아 있던 기술·정책 선택은 이 문서로 확정한다.
+- Decided: 2026-10-15 (Asia/Seoul)
+- Scope: First experimental release
+- Status: v1 baseline finalized. Implementation, deployment, and standards interoperability require separate verification.
+- This document resolves the technical and policy choices left open in the requirements.
 
-## 1. 확정 요약
+## 1. Decision Summary
 
-| 항목 | v1 결정 |
+| Item | v1 decision |
 | --- | --- |
-| 관리 웹앱 | Next.js 16, TypeScript, App Router 및 Node.js Route Handlers |
-| 실행 환경 | Node.js 24 LTS. 적용 시 해당 계열의 보안 패치 버전을 잠금 파일·이미지 digest로 고정 |
-| DB | MySQL 8.4 LTS, InnoDB, utf8mb4, UTC |
-| 데이터 접근 | mysql2의 파라미터 바인딩 SQL, 버전 관리된 SQL 마이그레이션 |
-| UI | Tailwind CSS 4, React, 한국어 기본, 선택된 다크 터미널 디자인 |
-| 지갑 | 별도 origin의 React + Vite + TypeScript PWA. 개인키·제출 처리는 브라우저에서 수행 |
-| 배포 | Linux 컨테이너, Docker Compose, Caddy HTTPS 프록시. 특정 클라우드에 종속하지 않음 |
-| 사진 저장 | S3 호환 객체 저장소. 개발 환경은 MinIO |
-| 등록번호 | UUID v4. 외부는 소문자 하이픈 포함 UUID, DB는 BINARY(16) |
-| 관리 인증 | NOMA별 패스키. 실명·전화번호·실제 이메일·일반 비밀번호 계정 없음 |
-| 복구 | NOMA별 256비트 무작위 단회용 복구 코드. 복구 시 새 패스키·새 소유키 등록 |
-| 증명서 | SD-JWT VC, 소유키 바인딩 필수, 개인정보는 고정 스키마 |
-| 제출 | OpenID4VP 1.0 Final, x509_san_dns, DCQL, direct_post.jwt |
-| 서명 | 발급기관 및 사용자 소유키: ES256 / P-256 / SHA-256 |
-| 증명서 수명 | 발급 후 30일, 사용자 요청에 의한 갱신 |
-| 상태 | 서명된 Token Status List, 묶음 단위 공개 배포 |
-| 최초 발급 | NOMA 전용 버전 API. v1에서는 OpenID4VCI 미채택 |
-| 복수 NOMA | 허용. 서버에 사람 단위 통합 계정·소유 목록을 만들지 않음 |
-| 범위 밖 | SNS, 전체 사용자 목록, 이름 검색, 메신저, 임의 필드, 외부 서비스 등록 |
+| Management application | Next.js 16, TypeScript, App Router, and Node.js Route Handlers |
+| Runtime | Node.js 24 LTS; pin a security-patched release in this series using lockfiles and image digests when adopted |
+| Database | MySQL 8.4 LTS, InnoDB, utf8mb4, UTC |
+| Data access | Parameter-bound SQL with mysql2; versioned SQL migrations |
+| UI | Tailwind CSS 4, React, English by default and the only shipped UI language in v1, selected Dark Terminal design |
+| Wallet | React + Vite + TypeScript PWA on a separate origin; private keys and presentations handled in the browser |
+| Deployment | Linux containers, Docker Compose, Caddy HTTPS proxy; independent of a specific cloud |
+| Photo storage | S3-compatible object storage; MinIO for development |
+| Registration number | UUID v4; lowercase hyphenated UUID externally, BINARY(16) in the DB |
+| Management authentication | Passkeys per NOMA identity; no legal name, phone number, real email, or conventional password account |
+| Recovery | Random 256-bit single-use recovery code per NOMA identity; register new passkey and holder key during recovery |
+| Credentials | SD-JWT VC, mandatory holder key binding, fixed profile schema |
+| Presentation | OpenID4VP 1.0 Final, x509_san_dns, DCQL, direct_post.jwt |
+| Signatures | Issuer and holder keys: ES256 / P-256 / SHA-256 |
+| Credential lifetime | 30 days from issuance; user-requested renewal |
+| Status | Signed Token Status Lists distributed publicly in batches |
+| Initial issuance | NOMA-specific versioned API; no OpenID4VCI in v1 |
+| Multiple NOMA identities | Allowed; no person-level unified account or ownership list on the server |
+| Out of scope | Social networks, complete user listings, name search, messengers, arbitrary fields, external service registration |
 
-패치 버전과 컨테이너 digest는 설치 시점에 고정한다. 이는 선택 미정이 아니라 보안 패치를 반영하기 위한 의존성 관리 규칙이다. 이 문서를 작성하면서 패키지를 설치하거나 서비스·유료 자원을 생성하지 않았다.
+Pin patch versions and container digests at installation time. This is a dependency management rule for incorporating security patches, not an unresolved choice. Preparing this document did not install packages or create services or paid resources.
 
-## 2. 배포 및 정보 경계
+## 2. Deployment and Information Boundaries
 
-논리 origin은 다음 세 가지로 분리한다. 실제 운영 도메인 구매는 배포 작업에서 수행한다.
+Separate the following three logical origins. Purchase production domains during deployment.
 
-- `ISSUER_ORIGIN`: 관리 웹앱, 발급·관리 API, 공개 개인정보 조회.
-- `WALLET_ORIGIN`: 지갑의 정적 PWA 파일. 외부 요청 처리용 백엔드는 두지 않는다.
-- `ASSET_ORIGIN`: 사진 및 공통 정적 파일. issuer의 공개키·상태 경로는 공통 정적 파일을 배포하는 경로로 구성한다.
+- `ISSUER_ORIGIN`: Management application, issuance and management APIs, public profile lookup.
+- `WALLET_ORIGIN`: Static wallet PWA files; no backend for handling external requests.
+- `ASSET_ORIGIN`: Photos and shared static files. Configure issuer public key and status paths as paths serving shared static files.
 
-운영 시 세 origin은 같은 등록 도메인 아래의 서로 다른 HTTPS 호스트로 배치한다. origin 분리와 first-party 통신을 함께 유지하되 쿠키는 issuer 호스트에만 둔다.
+In production, use separate HTTPS hosts under the same registered domain. Preserve origin separation and first-party communication; keep cookies on the issuer host only.
 
-지갑 origin은 개인키를 저장하는 보안 경계다. 출시 후 origin을 바꾸면 자동으로 기존 브라우저 키에 접근할 수 없으므로 복구 절차가 필요하다.
+The wallet origin is the security boundary for private key storage. Changing it after launch prevents automatic access to existing browser keys and requires recovery.
 
-발급·키 교체 시 관리 화면과 지갑의 연결은 사용자 동작으로 연 popup과 `postMessage`로 수행한다. 정확한 targetOrigin, event.origin, event.source와 일회용 연결 nonce를 검증한다. 공개키·발급용 challenge·그 서명에 더해 발급 결과의 noma_id·credential_id와 일회용 수령 토큰을 교환한다. 증명서 원문은 지갑이 발급 API에서 직접 받는다(6.1절). 개인키·복구 코드 원문과 외부 서비스 제출 요청은 이 통신으로 보내지 않는다. 복구 코드 해시는 등록에 필요한 경우에만 전달한다. 지갑 문서에는 Referrer-Policy: no-referrer를 적용한다.
+For issuance and key replacement, connect the management screen and wallet using a user-opened popup and `postMessage`. Validate the exact targetOrigin, event.origin, event.source, and a single-use connection nonce. Exchange public keys, issuance challenges, and their signatures, as well as the resulting noma_id, credential_id, and single-use receipt token. The wallet fetches credential bytes directly from the issuance API (Section 6.1). Never send private keys, plaintext recovery codes, or external presentation requests through this channel. Send recovery code hashes only when needed for registration. Apply Referrer-Policy: no-referrer to wallet documents.
 
-지갑으로 전달하는 제출 요청 URI는 URL fragment에 넣는다. 해당 값은 정적 호스팅 HTTP 요청에 포함시키지 않는다. 지갑이 fragment를 읽은 뒤 주소창에서 제거하고 외부 검증자의 요청 객체를 직접 가져온다. 외부 검증자는 브라우저 지갑을 위해 필요한 CORS를 허용한다. 지갑은 외부 응답도 직접 전송한다.
+Put presentation request URIs delivered to the wallet in the URL fragment so they are not included in static hosting HTTP requests. After reading the fragment, the wallet removes it from the address bar and fetches the external verifier's request object directly. External verifiers allow the CORS needed by browser wallets. The wallet also sends responses directly.
 
-NOMA 발급 서버가 제출 요청을 가져오는 프록시 역할을 하지 않는다. 서버에 외부 서비스명·요청·응답·가입·승인 기록을 전송하지 않는다. 지갑에 분석 SDK·외부 광고·원격 오류 수집 SDK를 넣지 않는다. 정적 파일 로딩과 발급·갱신 통신 자체는 존재하며, 웹 지갑을 발급기관 운영자로부터 암호학적으로 완전히 독립된 소프트웨어라고 주장하지 않는다.
+The NOMA issuer server must not proxy presentation request fetching. Do not send external service names, requests, responses, signups, or approval records to the server. Do not include analytics SDKs, external advertisements, or remote error collection SDKs in the wallet. Static file loading and issuance/renewal communication still occur; do not claim that the web wallet is cryptographically independent of its issuer operator.
 
-개발은 localhost의 분리된 포트로 진행한다. 실제 WebAuthn RP ID와 운영 origin은 배포 설정으로 주입하며 개발·운영 자격 증명을 공유하지 않는다.
+Develop on separate localhost ports. Inject the actual WebAuthn RP ID and production origins through deployment configuration. Never share development and production credentials.
 
-## 3. 등록번호·문자열·시간
+## 3. Registration Numbers, Strings, and Time
 
-- `noma_id`: 암호학적 무작위 UUID v4. 순번·출생년도·사용자 속성을 포함하지 않는다.
-- 화면에서도 UUID 전체를 복사·확인할 수 있게 한다. `noma_` 등의 추가 접두사를 붙이지 않는다.
-- 서버 UUID 변환은 UUID_TO_BIN/BIN_TO_UUID의 byte swap 옵션을 사용하지 않는다.
-- 내부 키·인증·사진·증명서 ID도 UUID v4 또는 프로토콜에서 요구하는 충돌 방지 식별자를 사용한다.
-- `name`, `email`: 앞뒤 공백 제거 → Unicode NFC 정규화 → Unicode 코드 포인트 수로 길이 검사.
-- 제어문자와 줄바꿈을 거부하고 HTML은 일반 텍스트로 출력한다. 표시상 숨김 문자에 대한 검증은 일관되게 적용하되 일반적인 Unicode 이름을 ASCII로 제한하지 않는다.
-- 이름 1~50자, 이메일 1~254자 또는 null. 이메일의 `@` 등 형식은 강제하지 않는다.
-- `birth_year`: 정수 1~9999 또는 null. 현재 연도나 현실 연령에 따라 범위를 바꾸지 않는다.
-- JSON에서 선택 필드는 null을 사용한다. 빈 이메일은 null로 바꾼다.
-- DB는 DATETIME(3), 서버·DB 세션은 UTC, API는 `YYYY-MM-DDTHH:mm:ss.sssZ`.
-- 동일 값으로 PATCH하면 revision과 updated_at을 변경하지 않는다.
-- 알 수 없는 필드·중복 JSON 키·잘못된 자료형은 거부한다.
+- `noma_id`: Cryptographically random UUID v4; contains no sequence, birth year, or user attributes.
+- Allow users to view and copy the full UUID. Do not add prefixes such as `noma_`.
+- Do not use the byte swap option of UUID_TO_BIN/BIN_TO_UUID for server UUID conversion.
+- Internal key, authentication, photo, and credential IDs also use UUID v4 or collision-resistant identifiers required by the protocol.
+- `name`, `email`: Trim leading/trailing whitespace → normalize to Unicode NFC → validate length by Unicode code point count.
+- Reject control characters and line breaks; render HTML as plain text. Apply consistent validation to invisible characters without restricting ordinary Unicode names to ASCII.
+- Names: 1–50 characters. Emails: 1–254 characters or null. Do not require syntax such as `@`.
+- `birth_year`: Integer 1–9999 or null. Do not vary the range by the current year or actual age.
+- Use null for optional JSON fields. Convert empty email strings to null.
+- DB: DATETIME(3). Server and DB sessions: UTC. API: `YYYY-MM-DDTHH:mm:ss.sssZ`.
+- A PATCH with unchanged values does not change revision or updated_at.
+- Reject unknown fields, duplicate JSON keys, and invalid data types.
 
-## 4. 인증·복구·복수 NOMA
+## 4. Authentication, Recovery, and Multiple Identities
 
-### 4.1 관리 인증
+### 4.1 Management Authentication
 
-NOMA마다 별도 관리 자격 증명을 둔다. 패스키는 discoverable credential로 등록하고 user verification을 필수로 한다. 서버 세션은 NOMA 하나에만 연결한다.
+Keep separate management credentials for each NOMA identity. Register passkeys as discoverable credentials and require user verification. Each server session is bound to one NOMA identity.
 
-- 이메일/전화번호 가입·복구는 제공하지 않는다.
-- 패스키 최대 5개/NOMA. 개별 삭제·추가 시 재인증한다.
-- 패스키 등록·로그인 challenge는 32바이트 무작위, 5분, 1회용.
-- 세션은 32바이트 무작위 토큰, 서버에는 SHA-256 해시만 저장한다.
-- 쿠키는 HttpOnly, Secure, SameSite=Lax, host-only. CSRF 토큰 및 Origin 검증을 병행한다.
-- 30분 비활동 또는 12시간 절대 만료. 일반 관리 세션에서 키 교체·NOMA 폐기에는 5분 이내 패스키 재인증을 요구한다. 패스키 분실 복구는 4.3절의 복구 코드 검증이 이 조건을 대신한다.
-- 일반 비밀번호 로그인은 제공하지 않는다. 패스키 미지원 환경에서는 발급·관리를 지원하지 않는다는 안내를 제공한다.
+- Do not provide email/phone signup or recovery.
+- Maximum five passkeys per NOMA identity. Reauthenticate when adding or deleting individual passkeys.
+- Passkey registration/login challenges: 32 random bytes, five-minute expiry, single-use.
+- Sessions: 32-byte random tokens; store only SHA-256 hashes on the server.
+- Cookies: HttpOnly, Secure, SameSite=Lax, host-only. Also validate CSRF tokens and Origin.
+- Expire after 30 minutes of inactivity or 12 hours absolutely. Key replacement and NOMA revocation in ordinary management sessions require passkey reauthentication within five minutes. For a lost passkey, recovery code verification in Section 4.3 replaces this requirement.
+- Do not provide conventional password login. Explain that issuance and management are unsupported where passkeys are unavailable.
 
-### 4.2 사용자 소유키
+### 4.2 Holder Keys
 
-각 NOMA에 하나의 활성 P-256 소유키를 둔다. 지갑에서 생성하는 비추출 CryptoKey를 IndexedDB에 저장하며 서버에는 공개키만 등록한다. 관리 패스키와 소유키는 별개다.
+Each NOMA identity has one active P-256 holder key. Store the wallet-generated, non-extractable CryptoKey in IndexedDB; register only its public key on the server. Management passkeys and holder keys are separate.
 
-- 등록 시 신규 개인키로 서버의 일회용 challenge에 서명하여 키 제어를 확인한다.
-- 지갑은 사용자의 명시적 승인 없이 서명하지 않는다.
-- 브라우저 저장소 삭제 또는 기기 분실 시 기존 개인키를 되살리는 방식 대신 새 소유키로 교체한다.
-- 비추출 키는 내보내기 방지를 의미하며, 악성 동일 origin 스크립트의 서명 사용까지 차단하는 하드웨어 보장을 의미하지 않는다.
-- 제3자 스크립트 제외, 엄격한 CSP, 안전한 DOM 출력, 빌드 무결성 및 별도 origin으로 키 사용 위험을 줄인다.
+- During registration, prove control by signing the server's single-use challenge with the new private key.
+- The wallet must not sign without explicit user approval.
+- After browser storage deletion or device loss, replace the holder key rather than restoring the old private key.
+- Non-extractability prevents key export; it is not a hardware guarantee against signing by malicious same-origin scripts.
+- Reduce key misuse risks through exclusion of third-party scripts, strict CSP, safe DOM output, build integrity, and a separate origin.
 
-### 4.3 복구 정책
+### 4.3 Recovery Policy
 
-지갑이 생성한 256비트 무작위 복구 코드를 Base32로 그룹 표기하고 등록 시 검증용 SHA-256 해시만 서버에 저장한다. 복구 코드는 사람의 비밀번호와 달리 충분한 무작위 엔트로피를 갖는다.
+The wallet generates a random 256-bit recovery code, displayed in grouped Base32. Store only its SHA-256 verification hash on the server at registration. Unlike a human password, this code has sufficient random entropy.
 
-- 사용자는 복구 파일(`.noma-recovery.json`)을 내려받고 안전하게 보관한다. 파일에는 noma_id, 형식 버전, 복구 코드만 포함한다.
-- 파일은 개인정보 증명서와 다르며 관리 권한을 가진 비밀이다. 화면에서 이를 분명히 안내한다.
-- 서버에 평문 복구 코드·파일을 저장하거나 로그로 남기지 않는다.
-- 복구 코드를 제출하면 한정된 5분짜리 복구 세션을 만들고 새 패스키·새 소유키 등록을 함께 완료한다.
-- 제한 복구 세션에서는 해당 NOMA의 새 패스키·새 소유키 challenge와 등록, 새 복구 코드 해시 설정 및 복구 완료만 허용한다. 프로필 수정·NOMA 폐기·증명서 다운로드·추가 일반 관리 작업은 거부한다. 완료 후 새 패스키 로그인으로 일반 관리 세션을 만든다.
-- 복구 세션 생성 시 코드를 소비하지 않는다. 완료 트랜잭션에서 코드가 아직 미사용인지 잠금 후 검사하고 한 번만 소비한다. 같은 코드로 만든 여러 복구 세션 중 하나만 완료할 수 있다.
-- 복구 완료 트랜잭션에서 기존 패스키·세션·소유키·유효 증명서를 모두 폐기하고 복구 코드를 교체한다.
-- 복구 시작·검증 실패·완료 트랜잭션 롤백만으로 기존 인증 수단을 폐기하지 않는다. 커밋 이후 외부 기록·상태 게시 지연은 실패로 되돌리지 않고 처리 중으로 표시한다(9.1절).
-- 기존 패스키가 있으면 그것으로 관리 인증 후 소유키를 교체할 수 있다. 기존 소유키가 없어도 가능하며 기존 증명서는 폐기한다.
-- 패스키와 복구 코드를 모두 잃으면 운영자에 의한 실명 확인·수동 계정 복구를 제공하지 않는다.
+- Users download and securely retain a recovery file (`.noma-recovery.json`) containing only noma_id, format version, and recovery code.
+- This file is a management secret, distinct from a profile credential. Clearly explain this in the UI.
+- Never store or log plaintext recovery codes or files on the server.
+- Submitting a recovery code creates a restricted five-minute recovery session to register a new passkey and holder key together.
+- Restricted recovery sessions permit only new passkey/holder key challenges and registration for that NOMA identity, setting a new recovery code hash, and recovery completion. Reject profile changes, NOMA revocation, credential downloads, and other ordinary management actions. After completion, sign in with the new passkey to create an ordinary management session.
+- Do not consume the code when creating a recovery session. Lock and check that it is still unused in the completion transaction, then consume it exactly once. Only one of multiple sessions created with the same code may complete.
+- The recovery completion transaction revokes all previous passkeys, sessions, holder keys, and valid credentials, and replaces the recovery code.
+- Recovery initiation, verification failure, or completion transaction rollback must not revoke existing authentication methods. After commit, external recording or publication delays remain pending rather than being rolled back as failures (Section 9.1).
+- An existing passkey can authenticate management access to replace a holder key, even when the old holder key is unavailable. Revoke old credentials.
+- If both passkeys and the recovery code are lost, do not provide operator-assisted real-world identity checks or manual account recovery.
 
-### 4.4 여러 NOMA와 여러 기기
+### 4.4 Multiple Identities and Devices
 
-한 사람이 여러 NOMA를 만들 수 있다. 지갑에는 여러 NOMA를 보관할 수 있지만 서버는 이를 사람 단위 통합 계정으로 묶지 않는다. 현실 인물당 발급 개수 제한도 두지 않는다.
+A person may create multiple NOMA identities. A wallet may store multiple identities, but the server does not group them into a person-level unified account. Do not impose a per-person issuance limit.
 
-v1은 한 NOMA의 소유키를 여러 기기에 복제·동기화하지 않는다. 다른 기기에서 소유키를 새로 등록하면 기존 소유키와 증명서를 폐기한다. 여러 기기의 동시 소유키 운용은 v1 범위에서 제외한다. 발급·관리 통신과 IP 등으로 어떤 연관성도 생기지 않는다고 보장하지는 않는다.
+v1 does not copy or synchronize a NOMA identity's holder key across devices. Registering a new holder key on another device revokes the old key and credentials. Simultaneous holder keys on multiple devices are outside v1 scope. Do not guarantee that issuance/management communication, IP addresses, or other signals cannot create correlations.
 
-## 5. 증명서와 OpenID4VP 프로필
+## 5. Credentials and OpenID4VP Profile
 
-### 5.1 규격 고정
+### 5.1 Pinned Specifications
 
-- 제출 프로토콜: OpenID4VP 1.0 Final (2025-07-09).
-- SD-JWT 기본 처리: RFC 9901.
-- 증명서: draft-ietf-oauth-sd-jwt-vc-19, format `dc+sd-jwt`.
-- 상태: draft-ietf-oauth-status-list-21, JWT 기반 Token Status List.
-- 초안 두 개는 최종 표준이라고 표기하지 않는다. 이후 개정은 프로필 버전 변경과 상호운용 테스트를 거쳐 채택한다.
-- NOMA 상호운용 프로필 버전: `noma-vp-1.0`.
+- Presentation protocol: OpenID4VP 1.0 Final (2025-07-09).
+- Base SD-JWT processing: RFC 9901.
+- Credentials: draft-ietf-oauth-sd-jwt-vc-19, format `dc+sd-jwt`.
+- Status: draft-ietf-oauth-status-list-21, JWT-based Token Status List.
+- Do not label the two drafts as final standards. Adopt later revisions through a profile version change and interoperability testing.
+- NOMA interoperability profile version: `noma-vp-1.0`.
 
-### 5.2 증명서 구조
+### 5.2 Credential Structure
 
-증명서 envelope는 발급자 `iss`, 증명서 유형 `vct`, 발급 시각 `iat`, 만료 시각 `exp`, 증명서 식별자 `jti`, 공개키 `cnf.jwk`, 상태 참조 `status`를 가진다. JOSE header는 고정된 허용 알고리즘과 `kid`를 사용한다.
+The credential envelope contains issuer `iss`, credential type `vct`, issuance time `iat`, expiration time `exp`, credential identifier `jti`, public key `cnf.jwk`, and status reference `status`. The JOSE header uses a fixed allowed algorithm and `kid`.
 
-기존 공개 데이터 객체는 고정 `noma` claim 아래에 그대로 넣는다. 따라서 표준의 `status` 객체와 기존 개인정보의 `noma.status` 문자열이 충돌하지 않는다. `noma.profile` 구조는 변경하지 않는다.
+Place the existing public data object unchanged under the fixed `noma` claim. This avoids a collision between the standard's `status` object and the profile's `noma.status` string. Preserve the `noma.profile` structure.
 
-- noma_id 및 규격·버전·시각·상태 메타데이터는 제출 시 필수다.
-- `profile`의 네 항목은 각각 선택 공개할 수 있게 인코딩한다. 임의 필드를 추가할 수 있다는 의미는 아니다.
-- 전체 공개 조회 API는 기존 네 항목을 계속 반환한다. 선택 공개 기능이 공개 조회 정보 자체를 비공개로 바꾸는 것은 아니다.
-- 정보 미설정의 null과 제출에서 공개하지 않은 항목의 부재를 구분한다. 지갑이 공개 조회 API에서 값을 채워 넣어 제출하지 않는다.
-- 소유키의 공개 JWK는 `kty`, `crv`, `x`, `y`만 허용하며 원격 키 URL이나 개인키 `d`는 거부한다.
-- 발급기관 서명과 Key Binding JWT는 ES256을 사용한다. KB-JWT의 nonce, aud, iat, sd_hash를 검증한다.
-- 사진이 있으면 별도 고정 claim `photo_sha256`에 저장 파일의 SHA-256을 넣고 photo_id와 함께 공개한다. 사진이 없으면 null이다. 사진의 실제 바이트는 증명서에 넣지 않는다.
+- noma_id and schema, revision, time, and status metadata are mandatory in presentations.
+- Encode each of the four `profile` fields for selective disclosure. This does not allow arbitrary fields.
+- The full public lookup API continues to return all four fields. Selective disclosure does not make the public lookup data private.
+- Distinguish null for unset information from absence of an undisclosed field. The wallet must not fill undisclosed fields using the public lookup API.
+- Allow only `kty`, `crv`, `x`, and `y` in holder public JWKs. Reject remote key URLs and private key `d`.
+- Use ES256 for issuer signatures and Key Binding JWTs. Validate KB-JWT nonce, aud, iat, and sd_hash.
+- If a photo exists, put the stored file's SHA-256 in the separate fixed `photo_sha256` claim and disclose it together with photo_id. Use null when no photo exists. Do not embed photo bytes in credentials.
 
-### 5.3 외부 검증자·요청·응답
+### 5.3 External Verifiers, Requests, and Responses
 
-- client_id는 `x509_san_dns:<검증자 도메인>`.
-- 서명된 요청 객체와 x5c 인증서 체인을 사용한다. 지갑은 신뢰한 공개 웹 PKI 루트 목록, 체인, 유효기간, DNS SAN, 인증서 용도, 서명을 검증한다.
-- 검증자 요청 서명은 ES256, RS256, PS256만 허용한다. RSA는 2048비트 이상.
-- 응답 목적지는 검증한 client_id의 같은 호스트에 있는 HTTPS URL만 허용한다. 요청 URI도 같은 호스트로 제한한다. localhost 개발 예외는 개발 빌드에서만 허용한다.
-- 요청 만료는 최대 5분, 시계 오차 허용은 60초. nonce와 state는 32바이트 무작위로 생성하고 검증자가 브라우저 세션에 연결한다.
-- 정보 요청은 DCQL, `require_cryptographic_holder_binding=true` 필수.
-- 응답은 `direct_post.jwt`, JWE ECDH-ES + A256GCM. 응답 암호화키는 서명된 요청 메타데이터에 포함한다.
-- 지갑은 해당 응답 목적지에 직접 POST한다. 검증자는 wallet origin에 대한 필요한 CORS를 제공한다.
-- 검증자는 올바른 요청 세션과 nonce를 단 한 번 원자적으로 소비한다. KB-JWT 허용 나이는 60초, 미래 시각 허용은 60초.
-- 지갑이 fetch하는 요청은 HTTPS, 최대 64KiB, 10초 타임아웃, 교차 호스트 redirect 금지. 프로덕션에서 IP literal·로컬 주소·임의 프로토콜은 거부한다.
-- 검증자 인증서에 대한 체인 검증과 표준 요구사항 구현을 통과하기 전에는 일반 인증서가 자동으로 지원된다고 주장하지 않는다.
-- NOMA 사전 등록, API 키 발급, 사용처 목록은 요구하지 않는다.
+- client_id: `x509_san_dns:<verifier domain>`.
+- Use signed request objects and x5c certificate chains. The wallet validates trusted public Web PKI roots, chain, validity period, DNS SAN, certificate purpose, and signature.
+- Allow only ES256, RS256, and PS256 for verifier request signatures. RSA keys must be at least 2048 bits.
+- Allow HTTPS response destinations only on the same host as the validated client_id. Restrict request URIs to that host as well. Localhost development exceptions are allowed only in development builds.
+- Requests expire within five minutes; allow 60 seconds of clock skew. Generate nonce and state as 32 random bytes and bind them to the verifier's browser session.
+- Use DCQL and require `require_cryptographic_holder_binding=true`.
+- Responses: `direct_post.jwt`, JWE ECDH-ES + A256GCM. Include the response encryption key in signed request metadata.
+- The wallet POSTs directly to the response destination. The verifier provides the necessary CORS for the wallet origin.
+- The verifier atomically consumes the correct request session and nonce exactly once. KB-JWT maximum age: 60 seconds; future timestamp tolerance: 60 seconds.
+- Wallet request fetching: HTTPS, at most 64 KiB, 10-second timeout, no cross-host redirects. Reject IP literals, local addresses, and arbitrary protocols in production.
+- Do not claim automatic support for ordinary certificates before certificate chain verification and standards requirements have passed implementation checks.
+- Do not require NOMA preregistration, API key issuance, or usage destination lists.
 
-### 5.4 증명서 수명과 최신성
+### 5.4 Credential Lifetime and Freshness
 
-- 유효기간 30일. 만료 7일 전부터 갱신 안내.
-- 자동 백그라운드 발급은 하지 않는다. 사용자가 지갑에서 요청하면 현재 정보와 활성 소유키로 갱신한다.
-- 단순 갱신은 개인정보 revision을 올리지 않는다.
-- 한 NOMA에는 유효 증명서 하나만 유지한다. 갱신·재발급 시 기존 증명서를 폐기하고 새 증명서를 발급한다.
-- 개인정보 수정 시 revision을 올리고 기존 증명서를 폐기한다. 지갑에 새 증명서 받기가 필요하다는 상태를 표시한다.
-- 소유키 교체·복구·NOMA 폐기 시 기존 증명서를 모두 폐기한다.
-- 발급 증명만 확인하는 오프라인 도구는 현재 가입 승인에 사용하지 않는다.
+- Valid for 30 days. Start renewal reminders seven days before expiration.
+- Do not issue automatically in the background. Renew using current information and the active holder key when requested by the user in the wallet.
+- Renewal alone does not increment the profile revision.
+- Keep one valid credential per NOMA identity. Revoke the old credential and issue a new one on renewal or reissuance.
+- Increment revision and revoke existing credentials when the profile changes. Show that the wallet needs a new credential.
+- Revoke all old credentials on holder key replacement, recovery, or NOMA revocation.
+- Offline tools that verify issuance alone must not authorize current signups.
 
-### 5.5 상태 배포
+### 5.5 Status Distribution
 
-- Token Status List는 1비트 상태(0=유효, 1=폐기), 131,072 슬롯 단위, 무작위 슬롯 할당. 미할당 슬롯은 폐기 값으로 유지한다.
-- 목록은 발급기관이 ES256으로 서명하고 정적 공개 경로로 배포한다.
-- 변경을 최대 30초 이내 게시하고, 변경이 없어도 60초마다 새 발행 시각으로 갱신한다.
-- HTTP cache max-age는 30초. 검증자는 발행 후 120초 이내 상태 목록만 가입·인증에 사용한다. 상태 토큰 exp는 발행 후 5분이다.
-- 신선한 목록을 확보하지 못하면 가입·소유 인증을 거절한다. 오래된 캐시를 유효 상태로 간주하지 않는다.
-- 따라서 폐기 전파에는 최대 120초의 허용 창이 있다. 즉시 전 세계에 반영된다고 약속하지 않는다.
-- 상태 조회 URL에는 noma_id나 검증 서비스명을 넣지 않는다. 통계는 목록 단위 접근만 집계한다.
-- 시각·색인·키 정보로 인한 외부 연결 가능성까지 제거하는 익명 증명 프로토콜은 아니다.
+- Token Status Lists: one-bit status (0=valid, 1=revoked), 131,072 slots per list, randomly assigned slots. Keep unassigned slots revoked.
+- The issuer signs lists with ES256 and distributes them at static public paths.
+- Publish changes within 30 seconds. Even without changes, refresh issuance time every 60 seconds.
+- HTTP cache max-age: 30 seconds. Verifiers accept lists issued within the last 120 seconds for signup/authentication. Status token exp: five minutes after issuance.
+- Reject signup and holder authentication if a fresh list is unavailable. Do not treat stale caches as evidence of validity.
+- Revocation therefore has an allowed propagation window of up to 120 seconds. Do not promise immediate worldwide updates.
+- Never include noma_id or verifier service names in status URLs. Aggregate statistics only at list level.
+- This is not an anonymous proof protocol that eliminates correlation through timestamps, indexes, or key information.
 
-### 5.6 발급기관 키
+### 5.6 Issuer Keys
 
-v1 컨테이너에서는 발급기관 서명키를 읽기 전용 secret 파일로 주입하고 MySQL·Git·환경 로그에 저장하지 않는다. secret 원본은 암호화해 오프라인 백업한다. 주기 교체는 90일, 새 키는 사용 24시간 전에 공개한다. 이전 공개키는 마지막 증명서 만료와 상태 목록 검증 기간까지 유지한다.
+Inject issuer signing keys into v1 containers as read-only secret files. Do not store them in MySQL, Git, or environment logs. Encrypt and back up source secrets offline. Rotate every 90 days and publish new keys 24 hours before use. Retain old public keys through the last credential expiration and status list verification period.
 
-키 유출 시 이전 kid를 신뢰 폐기 대상으로 공개하고 해당 키로 서명된 유효 증명서를 폐기·재발급한다. 검증 SDK는 신뢰된 issuer 키 메타데이터의 현재 신뢰 상태도 확인하며 만료된 키 메타데이터를 허용하지 않는다. 이미 내보낸 사본의 서명을 역사적으로 지울 수는 없다.
+On compromise, publicly mark the old kid as distrusted and revoke/reissue valid credentials signed by that key. The verification SDK also checks current trust status from trusted issuer key metadata and rejects expired metadata. Previously exported signatures cannot be erased historically.
 
-키 메타데이터와 JWKS의 캐시 TTL은 30초, 가입·인증 검증에서 허용하는 최신성은 120초다. 유출 키는 현재 신뢰 키 목록에서 제외하고 새 서명키로 상태 목록을 배포한다. 지갑은 배포물에 포함된 신뢰 루트 묶음으로 검증자 인증서를 검사하며 브라우저가 임의 x5c 체인을 자동 검증한다고 가정하지 않는다.
+Key metadata and JWKS cache TTL: 30 seconds. Maximum age for signup/authentication: 120 seconds. Remove compromised keys from the currently trusted set and distribute status lists signed with the new key. The wallet validates verifier certificates using bundled trusted roots; do not assume browsers automatically validate arbitrary x5c chains.
 
-## 6. 최초 발급·관리 트랜잭션
+## 6. Initial Issuance and Management Transactions
 
-최초 발급에는 NOMA 전용 `/api/v1` API를 사용한다. OpenID4VCI는 v1에서 구현하지 않는다. 증명서 제출 표준 채택과 최초 발급 표준 채택은 분리한다.
+Use NOMA-specific `/api/v1` APIs for initial issuance. v1 does not implement OpenID4VCI. Adoption of a presentation standard is separate from adoption of an initial issuance standard.
 
-- 발급 준비 요청은 만료 15분의 issuance intent와 관리 등록·소유키 확인 challenge를 생성한다.
-- 최종 요청에는 정규화된 개인정보, 검증된 패스키 등록 결과, 소유키 증명, 복구 코드 해시를 결합한다.
-- 검증 후 후보 증명서를 서명하고, MySQL 트랜잭션으로 NOMA·인증·소유키·복구·증명서·상태 슬롯·발행 outbox를 함께 기록한다.
-- 서명 후보는 커밋 전 사용자에게 반환하지 않는다. 실패하면 공개 등록과 유효 증명서가 생기지 않는다.
-- 클라이언트 idempotency key를 intent와 연결한다. 같은 완료 요청 재시도는 기존 결과를 돌려주며 중복 발급하지 않는다.
-- 증명서 반환은 해당 상태 목록 게시 완료 후에 한다. 게시가 지연되면 202와 같은 발급 작업 식별자로 대기 상태를 조회한다.
-- 개인정보 수정은 If-Match/revision 기반 낙관적 잠금으로 충돌 시 409/412를 반환한다.
-- 서명·게시·파일 저장을 DB 트랜잭션이라고 가정하지 않는다. outbox와 재시도로 일관성을 유지한다.
-- 관리 인증 challenge는 만료 1시간 후, 완료 intent와 idempotency 결과는 완료 24시간 후 삭제한다. 미완료 intent는 만료 24시간 후 삭제한다.
+- An issuance preparation request creates a 15-minute issuance intent and management registration/holder key challenges.
+- The final request binds normalized profile data, verified passkey registration results, holder key proof, and the recovery code hash.
+- After validation, sign a candidate credential and record the NOMA identity, authentication, holder key, recovery data, credential, status slot, and publication outbox in one MySQL transaction.
+- Never return the signed candidate before commit. Failure must not leave a public registration or valid credential.
+- Bind the client idempotency key to the intent. Repeating the same completion request returns the existing result without duplicate issuance.
+- Return credentials only after the corresponding status list is published. On delay, return 202 and the same issuance operation identifier for polling.
+- Use If-Match/revision optimistic locking for profile changes; return 409/412 on conflict.
+- Signing, publication, and file storage are not DB transactions. Maintain consistency through outboxes and retries.
+- Delete management challenges one hour after expiry, completed intents and idempotency results 24 hours after completion, and incomplete intents 24 hours after expiry.
 
-### 6.1 지갑의 증명서 수령
+### 6.1 Wallet Credential Receipt
 
-- 발급 완료는 서버 발급 완료와 지갑 저장 완료를 구분한다. 관리 화면에는 상태 게시 완료 후 noma_id·credential_id를 표시하고, 지갑 저장 확인 전에는 “지갑에 저장 필요”로 표시한다.
-- 최초 발급의 result 토큰 또는 해당 NOMA의 일반 관리 세션으로 수령 권한을 요청한다. 서버는 현재 증명서에만 32바이트 무작위 수령 토큰을 발급한다. 토큰은 5분 만료이며 credential_id·noma_id·활성 holder_key_id에 결합한다. 서버에는 SHA-256 해시만 저장하며 같은 증명서의 이전 미소비 토큰은 무효화한다.
-- 관리 화면은 연결 nonce와 함께 결과 식별자·수령 토큰을 검증한 지갑 창에 전달한다. 지갑은 자신의 공개키와 대상 소유키가 일치하는지 확인한 후 수령 challenge를 요청한다. challenge는 32바이트 무작위, 1분 만료, 1회용이다.
-- challenge 응답에는 대상 holder_key_id와 공개 JWK thumbprint를 포함해 지갑이 로컬 키와 비교할 수 있게 한다. 지갑은 사용자 승인 후 ES256으로 고정 필드의 JSON 배열 `["noma-credential-receive-v1", ISSUER_ORIGIN, noma_id, credential_id, SHA256(수령 토큰), challenge]`의 UTF-8 바이트에 서명한다. 공백 없는 JSON 직렬화, 설정된 origin 문자열, 소문자 UUID를 사용한다. 해시와 challenge는 base64url(패딩 없음), 서명은 64바이트 R||S의 base64url 표기다. 서버는 저장된 대상 소유키로 검증하며 임의 공개키를 받지 않는다.
-- 수령 API는 토큰·challenge·서명·현재 활성 NOMA/소유키/증명서와 상태 게시 완료를 함께 확인하고, 트랜잭션으로 토큰과 challenge를 소비한다. 만료·다른 키·다른 발급 건·중복 수령은 거부한다. 대기 중인 보안 변경이 있으면 반환하지 않는다.
-- HTTP 응답 유실 또는 IndexedDB 저장 실패 시 소비된 토큰을 재사용하지 않는다. 관리 화면에서 같은 증명서의 새 수령 토큰을 요청하고 새 challenge로 재시도한다. 수령 재시도는 새 증명서를 발급하거나 revision을 올리지 않는다. 최초 result 토큰 만료 후에는 패스키 로그인으로 진행한다.
-- 지갑은 issuer 서명·대상 ID·cnf 공개키·만료·상태를 확인하고 증명서를 IndexedDB에 저장한 다음 연결 nonce와 credential_id를 포함한 저장 완료 응답을 관리 창에 보낸다. 창이 닫히면 연결을 새로 만들고 재시도한다. 개인키를 잃은 경우 수령 재시도 대신 키 교체 또는 복구로 안내한다.
-- 키 교체·복구는 새 증명서를 자동 발급하지 않는다. 새 키 등록 후 사용자가 발급을 요청하며, 이후 수령도 같은 절차를 따른다. 지갑의 직접 갱신 응답은 이미 관리 인증·소유키 증명을 검증한 6절의 게시 완료 조건을 따른다.
-- 토큰·challenge·서명·증명서는 URL/쿼리 문자열·영속 로그에 넣지 않는다. 수령 API는 WALLET_ORIGIN만 CORS로 허용하고 쿠키 없이 토큰과 소유키 증명으로 인증하며 no-store를 적용한다. 수령 권한 생성 API에는 기존 관리 인증 또는 최초 result 토큰과 Origin 검증을 적용한다.
-- 수령 토큰은 만료 1시간 후 삭제한다. 폐기·키 교체·복구·증명서 교체 시 해당 미소비 수령 토큰을 무효화한다. 수령 권한 생성·challenge·수령은 각각 NOMA당 10회/분으로 제한한다.
-- 수령 토큰과 challenge의 전송 표기는 base64url(패딩 없음)이며 SHA-256은 디코딩한 원래 무작위 바이트를 대상으로 한다. 한 수령 토큰의 challenge는 하나만 유지하고 재요청 시 이전 challenge를 무효화한다.
+- Distinguish server issuance completion from wallet storage completion. Display noma_id and credential_id in management after status publication completes; show “Save to wallet required” until wallet storage is confirmed.
+- Request a receipt grant using the initial issuance result token or an ordinary management session for that NOMA identity. Issue a random 32-byte receipt token only for the current credential. The token expires in five minutes and is bound to credential_id, noma_id, and the active holder_key_id. Store only its SHA-256 hash and invalidate previous unconsumed tokens for the same credential.
+- The management screen sends result identifiers and the receipt token with the connection nonce to the validated wallet window. The wallet checks that its public key matches the target holder key, then requests a receipt challenge: 32 random bytes, one-minute expiry, single-use.
+- The challenge response includes the target holder_key_id and public JWK thumbprint for comparison with the local key. After user approval, the wallet signs the UTF-8 bytes of the fixed-field JSON array `["noma-credential-receive-v1", ISSUER_ORIGIN, noma_id, credential_id, SHA256(receipt token), challenge]` using ES256. Use JSON serialization without whitespace, the configured origin string, and lowercase UUIDs. Encode the hash and challenge as unpadded base64url; encode the 64-byte R||S signature as base64url. The server verifies with the stored target holder key and does not accept arbitrary public keys.
+- The receipt API checks the token, challenge, signature, currently active NOMA identity/holder key/credential, and completed status publication, then consumes the token and challenge transactionally. Reject expiry, different keys, different issuance targets, and duplicate receipt. Do not return credentials while security changes are pending.
+- After HTTP response loss or IndexedDB storage failure, never reuse a consumed token. Request a new receipt token for the same credential from management and retry with a new challenge. Receipt retries do not issue a new credential or increment revision. After the initial result token expires, use passkey login.
+- The wallet verifies the issuer signature, target IDs, cnf public key, expiration, and status, stores the credential in IndexedDB, and sends a storage completion response containing the connection nonce and credential_id to the management window. If a window closes, establish a new connection and retry. If the private key is lost, guide the user to key replacement or recovery instead.
+- Key replacement and recovery do not automatically issue new credentials. The user requests issuance after registering the new key; subsequent receipt follows the same procedure. Direct wallet renewal responses follow the publication completion conditions in Section 6 after management authentication and holder proof have been verified.
+- Never put tokens, challenges, signatures, or credentials in URLs, query strings, or persistent logs. Receipt APIs allow only WALLET_ORIGIN through CORS, authenticate using the token and holder proof without cookies, and apply no-store. Grant creation requires existing management authentication or the initial result token plus Origin validation.
+- Delete receipt tokens one hour after expiry. Invalidate applicable unconsumed tokens on revocation, key replacement, recovery, or credential replacement. Limit grant creation, challenge requests, and receipt to 10 requests per minute per NOMA identity each.
+- Transmit receipt tokens and challenges as unpadded base64url. SHA-256 operates on the decoded original random bytes. Maintain one challenge per receipt token; requesting another invalidates the previous challenge.
 
-## 7. 사진 정책
+## 7. Photo Policy
 
-- 입력: JPEG, PNG, 정적 WebP. GIF, SVG, 동영상·애니메이션은 미지원.
-- 최대 업로드 5MiB, 가로·세로 최대 4096px, 총 16메가픽셀.
-- 헤더·실제 디코딩 결과를 검사하며 파일 확장자만 신뢰하지 않는다.
-- 사용자 자르기로 정사각형 선택, 서버에서 최대 1024×1024 정적 WebP로 재인코딩한다. 업스케일하지 않는다.
-- 재인코딩 시 EXIF 등 메타데이터를 제거하고 저장 파일의 SHA-256을 계산한다.
-- 원본은 보관하지 않는다. 파일 처리 실패는 발급 실패와 구분해 재업로드할 수 있게 한다.
-- 파일 이름은 UUID 기반이며 원래 파일 이름·사용자 입력 URL을 저장 경로로 사용하지 않는다.
-- 파일은 immutable 객체다. 교체할 때 새 photo_id와 새 파일을 만든다.
-- 공개 캐시 TTL 60초. 폐기·교체 후 이전 자산은 즉시 조회 대상에서 제외하고 서버·객체 저장소에서 24시간 이내 삭제한다.
-- 업로드 후 24시간 동안 어떤 NOMA에도 연결되지 않은 파일은 삭제한다.
-- 증명서의 사진 해시는 저장된 WebP 바이트를 대상으로 한다. 외부 사본의 삭제까지 보장하지 않는다.
+- Input: JPEG, PNG, static WebP. GIF, SVG, video, and animation are unsupported.
+- Maximum upload: 5 MiB; maximum width/height: 4096 px; maximum total: 16 megapixels.
+- Validate headers and actual decoding results; never trust file extensions alone.
+- Users select a square crop; the server re-encodes it as static WebP at up to 1024×1024. Do not upscale.
+- Remove EXIF and other metadata during re-encoding and compute the stored file's SHA-256.
+- Do not retain originals. Distinguish processing failures from issuance failures so users can re-upload.
+- Use UUID-based filenames. Never use original filenames or user-provided URLs as storage paths.
+- Files are immutable objects. Replacements create a new photo_id and file.
+- Public cache TTL: 60 seconds. Immediately exclude old assets from lookup after revocation/replacement; delete them from server/object storage within 24 hours.
+- Delete files not linked to any NOMA identity within 24 hours of upload.
+- Credential photo hashes cover the stored WebP bytes. Do not guarantee deletion of external copies.
 
-## 8. API 계약
+## 8. API Contract
 
-모든 API는 JSON, 공개 CORS는 자격 증명 없이 `*`, 관리 API는 명시한 issuer/wallet origin만 허용한다. 관리 API에는 인증·CSRF 검증을 적용한다.
+All APIs use JSON. Public CORS allows `*` without credentials; management APIs allow only the configured issuer/wallet origins. Apply authentication and CSRF validation to management APIs.
 
-| 메서드·경로 | 역할 |
+| Method and path | Purpose |
 | --- | --- |
-| GET `/api/v1/nomas/{noma_id}` | 확정된 공개 데이터 응답. 폐기 시 profile=null |
-| GET `/api/v1/photos/{photo_id}` | 공개 사진 파일. 삭제 시 410 또는 공개 존재 여부에 맞춘 404 |
-| POST `/api/v1/issuance-intents` | 발급 준비 challenge |
-| POST `/api/v1/issuance-intents/{id}/complete` | 최종 발급 요청 |
-| GET `/api/v1/issuance-intents/{id}/result` | 비밀 작업 토큰으로 결과 조회 |
-| POST `/api/v1/auth/options` | 패스키 로그인 옵션 |
-| POST `/api/v1/auth/verify` | 패스키 검증·세션 생성 |
-| POST `/api/v1/auth/logout` | 세션 폐기 |
-| PATCH `/api/v1/nomas/{noma_id}` | 본인 정보 수정 |
-| POST `/api/v1/nomas/{noma_id}/revoke` | 영구 폐기 |
-| POST `/api/v1/photos` | 인증된 업로드. 최초 발급은 intent 토큰으로 제한 |
-| POST `/api/v1/nomas/{noma_id}/credentials/challenge` | 증명서 발급·갱신용 소유키 challenge |
-| POST `/api/v1/nomas/{noma_id}/credentials` | 소유키 검증 후 발급·갱신 |
-| GET `/api/v1/nomas/{noma_id}/credentials/current` | 관리 인증 후 현재 증명서 다운로드 |
-| POST `/api/v1/nomas/{noma_id}/credentials/{credential_id}/receipt-grants` | 일반 관리 인증 또는 최초 result 토큰으로 일회용 수령 권한 생성 |
-| POST `/api/v1/nomas/{noma_id}/credentials/{credential_id}/receipt-challenge` | 수령 토큰으로 소유키 확인 challenge 요청 |
-| POST `/api/v1/nomas/{noma_id}/credentials/{credential_id}/receive` | 수령 토큰·challenge 서명 검증 및 원자적 소비 후 지갑에 반환 |
-| POST `/api/v1/nomas/{noma_id}/holder-keys/challenge` | 신규 소유키 등록 challenge |
-| POST `/api/v1/nomas/{noma_id}/holder-keys` | 재인증 및 새 키 제어 증명으로 키 교체 |
-| POST `/api/v1/recovery/start` | 복구 코드 검증·제한 복구 세션 |
-| POST `/api/v1/recovery/complete` | 새 인증·소유키·복구 코드로 복구 완료 |
-| GET `/api/v1/security-operations/{event_id}` | 별도 작업 토큰으로 무효화 기록·게시 완료 여부만 조회 |
-| POST `/api/v1/nomas/{noma_id}/passkeys/options` | 추가 패스키 등록 challenge |
-| POST `/api/v1/nomas/{noma_id}/passkeys` | 추가 패스키 등록 결과 검증 |
-| DELETE `/api/v1/nomas/{noma_id}/passkeys/{id}` | 관리 인증 수단 폐기 |
-| GET `/.well-known/jwt-vc-issuer` | 표준에 따른 발급기관 메타데이터 |
-| GET `/.well-known/jwks.json` | 발급기관 공개키 |
-| GET `/credentials/noma-v1` | NOMA 증명서 유형 메타데이터·고정 스키마 |
-| GET `/status/{list_id}.jwt` | 서명된 상태 목록 |
+| GET `/api/v1/nomas/{noma_id}` | Defined public response; profile=null when revoked |
+| GET `/api/v1/photos/{photo_id}` | Public photo file; 410 after deletion or 404 according to public existence disclosure |
+| POST `/api/v1/issuance-intents` | Issuance preparation challenge |
+| POST `/api/v1/issuance-intents/{id}/complete` | Final issuance request |
+| GET `/api/v1/issuance-intents/{id}/result` | Result lookup with secret operation token |
+| POST `/api/v1/auth/options` | Passkey login options |
+| POST `/api/v1/auth/verify` | Passkey verification and session creation |
+| POST `/api/v1/auth/logout` | Session revocation |
+| PATCH `/api/v1/nomas/{noma_id}` | Edit own profile |
+| POST `/api/v1/nomas/{noma_id}/revoke` | Permanent revocation |
+| POST `/api/v1/photos` | Authenticated upload; initial issuance restricted by intent token |
+| POST `/api/v1/nomas/{noma_id}/credentials/challenge` | Holder key challenge for credential issuance/renewal |
+| POST `/api/v1/nomas/{noma_id}/credentials` | Issue/renew after holder key verification |
+| GET `/api/v1/nomas/{noma_id}/credentials/current` | Download current credential after management authentication |
+| POST `/api/v1/nomas/{noma_id}/credentials/{credential_id}/receipt-grants` | Create single-use receipt grant with ordinary management authentication or initial result token |
+| POST `/api/v1/nomas/{noma_id}/credentials/{credential_id}/receipt-challenge` | Request holder key challenge with receipt token |
+| POST `/api/v1/nomas/{noma_id}/credentials/{credential_id}/receive` | Verify receipt token/challenge signature, consume atomically, and return to wallet |
+| POST `/api/v1/nomas/{noma_id}/holder-keys/challenge` | New holder key registration challenge |
+| POST `/api/v1/nomas/{noma_id}/holder-keys` | Replace key after reauthentication and proof of new key control |
+| POST `/api/v1/recovery/start` | Verify recovery code and create restricted recovery session |
+| POST `/api/v1/recovery/complete` | Complete recovery with new authentication, holder key, and recovery code |
+| GET `/api/v1/security-operations/{event_id}` | Check only invalidation recording/publication completion using a separate operation token |
+| POST `/api/v1/nomas/{noma_id}/passkeys/options` | Additional passkey registration challenge |
+| POST `/api/v1/nomas/{noma_id}/passkeys` | Verify additional passkey registration |
+| DELETE `/api/v1/nomas/{noma_id}/passkeys/{id}` | Revoke a management authentication method |
+| GET `/.well-known/jwt-vc-issuer` | Standard issuer metadata |
+| GET `/.well-known/jwks.json` | Issuer public keys |
+| GET `/credentials/noma-v1` | NOMA credential type metadata and fixed schema |
+| GET `/status/{list_id}.jwt` | Signed status list |
 
-404는 없는 번호, 410은 명시적으로 폐기된 관리 작업, 422는 입력 제약, 401/403은 인증·권한, 409/412는 충돌, 429는 제한을 의미한다. 폐기 NOMA의 공개 조회는 tombstone을 포함해 200으로 반환한다. 오류 body는 고정 error code와 사용자용 message만 제공하며 내부 스택은 노출하지 않는다.
+404 means an unknown identifier; 410 an explicitly revoked management operation; 422 input constraints; 401/403 authentication/authorization; 409/412 conflicts; 429 rate limits. Public lookup of a revoked NOMA identity returns 200 with a tombstone. Error bodies contain only a fixed error code and user-facing message, never internal stacks.
 
-공개 조회 cache TTL은 30초, 관리·복구·증명서 다운로드·수령은 no-store. 제한 복구 세션은 일반 관리 인증으로 인정하지 않는다. 수령 권한 생성은 상태 미게시 시 202, 수령 challenge·receive는 미게시 시 409로 거부하며 토큰을 소비하지 않는다. 외부 서비스 등록·OAuth client 등록·사용처 보고 API는 존재하지 않는다.
+Public lookup cache TTL: 30 seconds. Management, recovery, credential downloads, and receipt use no-store. Restricted recovery sessions do not count as ordinary management authentication. Grant creation returns 202 when status is unpublished; receipt challenge/receive return 409 without consuming the token. There are no external service registration, OAuth client registration, or usage reporting APIs.
 
-## 9. 운영·보존·제한
+## 9. Operations, Retention, and Limits
 
-- 공개 조회 60회/분/IP, 사진 120회/분/IP, 발급 준비 5회/시간/IP, 최종 발급 3회/시간/IP.
-- 패스키·복구 실패 제한은 IP와 대상 NOMA 양쪽에 적용한다. 15분에 10회 실패 시 해당 조합을 15분 제한하며, 대상 NOMA 전체는 15분에 30회 실패 시 15분 제한한다.
-- 증명서 갱신은 NOMA당 10회/일, 사진 업로드 10회/시간/NOMA.
-- IP는 메모리의 시간 구간별 회전 HMAC 키로 가명화하여 제한에만 쓰고 최대 1시간 후 삭제한다. 원문 IP·User-Agent·Referer·외부 서비스 주소를 영속 로그에 남기지 않는다.
-- 소규모 v1은 issuer 단일 replica로 제한을 일관되게 적용한다. 재시작 시 rate-limit 상태가 사라질 수 있음을 운영상 한계로 기록한다.
-- 일반 접근 로그를 끄고 경로 템플릿·응답코드·지연·무작위 요청 ID만 기록한다. 프로필 원문·복구 코드·서명 토큰·쿼리 문자열·인증 header는 기록하지 않는다.
-- 내부 오류 로그는 7일, NOMA별 관리 변경 감사 내역은 30일. 감사 내역에는 행위 종류·시각·버전만 두고 개인정보 이전 값과 이용처를 저장하지 않는다.
-- 지갑 제출 내역은 v1에서 아예 저장하지 않는다. 지갑 개인키와 증명서는 IndexedDB에만 둔다.
-- 개인정보 폐기 시 현재 프로필은 즉시 제거하고 사진·관리 패스키·복구·세션은 24시간 이내 정리한다. 최소 tombstone(noma_id, revision, 상태, 발급·폐기 시각)은 영구 보존한다.
-- 폐기 증명서의 상태는 원래 만료+7일까지 유지한다. 증명서 원본·해당 발급 내역은 동일 기한 후 삭제한다. 이전 소유키의 공개키는 마지막 참조 증명서 정리까지 유지하고 이후 제거한다. 인증 비밀을 보관하는 것은 아니다. 정리 작업은 참조 순서에 따라 세션·challenge·증명서를 먼저 제거한다. 활성 개인정보의 별도 과거 이력 저장은 하지 않는다.
-- MySQL·객체 저장소 백업은 암호화, 하루 1회, 7일 보존. 일반 프로필·사진·신규 발급의 복구 시점 목표(RPO)는 최대 24시간이며 최신 정상 백업이 24시간을 넘으면 목표 미달로 경보한다. 성공 응답한 보안 무효화의 RPO는 0을 목표로 하며 9.1절의 별도 기록을 필수로 한다. 재해복구 시 이를 재적용한 후 서비스를 연다. 백업 만료까지 지연 삭제될 수 있음을 고지한다.
-- 공개 시스템의 대량 수집을 완전히 막을 수 있다고 주장하지 않는다. CAPTCHA·실명 인증·외부 추적 SDK는 초기 버전에 넣지 않는다.
+- Public lookup: 60 requests/minute/IP. Photos: 120/minute/IP. Issuance preparation: five/hour/IP. Final issuance: three/hour/IP.
+- Apply passkey/recovery failure limits to both IP and target identity. Ten failures in 15 minutes block that combination for 15 minutes; 30 failures in 15 minutes against an identity block the identity for 15 minutes.
+- Credential renewal: 10/day/NOMA identity. Photo uploads: 10/hour/NOMA identity.
+- Pseudonymize IPs using in-memory HMAC keys rotated by time window, use only for rate limiting, and delete within one hour. Never persist raw IPs, User-Agent, Referer, or external service addresses in logs.
+- The small-scale v1 uses a single issuer replica for consistent limits. Record loss of rate-limit state on restart as an operational limitation.
+- Disable ordinary access logs. Record only route templates, response codes, latency, and random request IDs. Do not log profile contents, recovery codes, signed tokens, query strings, or authentication headers.
+- Retain internal error logs for seven days and per-identity management change audits for 30 days. Audit records contain only action type, time, and revision, not previous profile values or usage destinations.
+- v1 does not store wallet presentation history at all. Wallet private keys and credentials reside only in IndexedDB.
+- On NOMA revocation, remove the current profile immediately and clean up photos, management passkeys, recovery data, and sessions within 24 hours. Retain a minimal tombstone (noma_id, revision, status, issuance and revocation times) permanently.
+- Retain revoked credential status until seven days after original expiration. Delete credential bytes and issuance records after that deadline. Retain old holder public keys until the last referencing credential is cleaned up, then remove them; this does not retain authentication secrets. Follow reference order during cleanup, removing sessions, challenges, and credentials first. Do not store separate historical profiles for active identities.
+- Encrypt MySQL/object storage backups, create them daily, and retain them seven days. Ordinary profile/photo/new issuance recovery point objective (RPO): at most 24 hours; alert if the latest healthy backup is older. Target RPO 0 for successfully acknowledged security invalidations, requiring the separate records in Section 9.1. Replay those records before reopening after disaster recovery. Disclose that deletion from backups can be delayed until backup expiration.
+- Do not claim to prevent all bulk collection from a public system. The initial release excludes CAPTCHA, real-world identity verification, and external tracking SDKs.
 
-### 9.1 보안 무효화 기록과 재해복구
+### 9.1 Security Invalidation Records and Disaster Recovery
 
-일반 관리 감사(30일)와 별도로, 백업 복원으로 이미 폐기한 권한이 되살아나는 것을 막는 최소 기록을 보존한다. 운영 DB·일일 백업과 장애 영역 및 쓰기 자격 증명을 분리한 암호화 S3 호환 저장소에 변경 불가 객체로 기록한다. 운영 쓰기 자격 증명에는 덮어쓰기·삭제 권한을 주지 않고 보존 정책 변경은 별도 운영 권한으로 제한한다. 개발 MinIO 하나만으로 운영의 독립 보존 조건을 충족했다고 간주하지 않는다.
+Keep minimal records separate from the ordinary 30-day management audit to prevent backup restoration from reviving revoked authority. Write immutable objects to encrypted S3-compatible storage with a failure domain and write credentials separate from the operational DB and daily backups. Operational write credentials cannot overwrite or delete; retention policy changes require separate operational authority. A single development MinIO instance does not satisfy production independent retention requirements.
 
-- 기록에는 event_id, 단조 증가 sequence, 작업 종류, 시각, 대상 ID와 필요한 무효화 정보만 둔다. 프로필 원문·사진·IP·이용처·개인키·세션 토큰·복구 코드 및 해시는 넣지 않는다.
-- NOMA 폐기는 최소 tombstone 필드, 증명서 폐기는 credential_id·noma_id·list_id·slot_index·원래 만료 시각, 소유키·패스키 폐기는 해당 ID, 복구 코드 소비는 recovery_id, 발급기관 키 신뢰 철회는 kid를 기록한다. 복구 시 기존 인증 수단의 모든 대상 ID를 포함해 묶음 하나로 기록한다. 새 인증 비밀은 기록하지 않는다.
-- NOMA tombstone과 발급기관 키 신뢰 철회는 영구 보존한다. 증명서 폐기는 원래 만료+14일까지, 소유키·패스키·복구 코드 무효화는 최소 45일 및 마지막 참조 증명서 만료+14일 중 긴 기간 보존한다. 이는 최대 7일 된 백업 복원과 증명서 정리 기간을 포함한다. 일반 감사·백업과 별도인 보존 항목으로 고지한다.
-- 외부 기록은 대상별 payload 객체와 그 digest를 묶는 event manifest로 구성한다. 영구 보존 대상과 유한 보존 대상을 분리해 같은 작업의 tombstone 때문에 모든 인증 식별자를 영구 보관하지 않는다. 보존 만료 payload의 정리는 별도 보존 관리 권한으로 수행하고 대상 digest·만료 근거를 담은 변경 불가 정리 증명과 구간 체크포인트를 남긴다. 복원 검증은 정당하게 만료된 payload와 유실된 payload를 구분하며, manifest의 sequence 연속성과 보존 중 payload의 digest를 검사한다. 체크포인트·정리 증명에는 대상 ID나 비밀을 추가하지 않는다.
-- 무효화가 발생하는 프로필 수정·증명서 교체·키 교체·패스키 삭제·복구·NOMA 폐기·issuer 키 신뢰 철회는 업무 변경과 `security_invalidation_outbox`를 같은 DB 트랜잭션으로 커밋한다. 단일 기록 worker가 sequence 순서로 외부 객체를 기록·검증한 뒤 완료 표시한다. event_id 기반으로 재시도하며 같은 sequence에 다른 내용이 있으면 운영 오류로 중단한다.
-- 외부 객체의 내구성 확인 뒤 이전 sequence와 digest를 포함한 최신 체크포인트를 별도 저장소에 기록한다. 성공 응답·새 증명서 반환·해당 변경의 상태 목록/키 메타데이터 게시는 체크포인트 확인 이후에만 허용한다. DB 표시 전 worker가 중단되면 같은 객체·체크포인트를 확인해 완료한다. 게시 worker는 미확인 변경을 포함한 DB 스냅샷을 배포하지 않는다.
-- 외부 저장 실패 시 DB에 커밋된 변경은 되돌리지 않고 작업 식별자와 202를 반환한다. 기존 권한은 운영 DB에서 즉시 거부하고 새 권한·증명서 수령은 기록 완료까지 막는다. 같은 요청은 idempotency key로 기존 작업을 조회한다. 기록 지연 동안 해당 상태 목록·키 메타데이터의 재발행을 중단해 외부 검증자가 120초 최신성 조건에 따라 거절하도록 한다. 이 장애에서는 30초 게시 목표를 충족하지 못함을 경보한다.
-- 요청 재시도용 idempotency key는 대상 NOMA·작업 종류·정규화한 요청 해시에 결합하며 같은 키의 다른 내용은 409로 거부한다. 작업 조회는 32바이트 무작위 토큰으로 인증하고 서버에는 해시만 저장한다. 토큰은 최초 요청 클라이언트가 생성해 header로 전달하여 응답 유실 후에도 조회할 수 있게 한다. 조회에는 상태만 반환하고 새 인증 권한을 부여하지 않는다. 완료 24시간 후 조회 토큰을 무효화하고 완료 outbox는 7일 후 정리한다. 미완료 작업은 자동 삭제하지 않는다.
-- DB·별도 저장소를 동시에 잃으면 RPO 0을 보장하지 않는다. 성공 응답하지 못한 작업은 복원 시 누락될 수 있으므로 사용자는 대기 상태를 완료로 간주하지 않는다. 별도 저장소에 기록된 작업은 응답 유실 여부와 관계없이 복원 시 재적용한다.
+- Records contain only event_id, a monotonically increasing sequence, operation type, time, target IDs, and necessary invalidation data. Do not include profile contents, photos, IPs, usage destinations, private keys, session tokens, recovery codes, or recovery code hashes.
+- Record minimal tombstone fields for NOMA revocation; credential_id, noma_id, list_id, slot_index, and original expiration for credential revocation; relevant IDs for holder key/passkey revocation; recovery_id for recovery code consumption; and kid for issuer key distrust. Record all previous authentication target IDs as one recovery batch. Do not record new authentication secrets.
+- Retain NOMA tombstones and issuer key distrust permanently. Retain credential revocation through original expiration plus 14 days. Retain holder key, passkey, and recovery code invalidations for the longer of at least 45 days or the last referencing credential's expiration plus 14 days. These periods cover restoration from backups up to seven days old and credential cleanup. Disclose retention separately from ordinary audits/backups.
+- External records consist of per-target payload objects and an event manifest binding their digests. Separate permanent and finite-retention targets so a tombstone does not cause all authentication identifiers in the same operation to be retained forever. Expired payload cleanup requires separate retention-management authority and leaves immutable cleanup attestations containing the target digest and expiry justification, plus interval checkpoints. Restoration distinguishes legitimately expired payloads from lost payloads, checking manifest sequence continuity and retained payload digests. Do not add target IDs or secrets to checkpoints or cleanup attestations.
+- Profile changes, credential replacement, key replacement, passkey deletion, recovery, NOMA revocation, and issuer key distrust that invalidate authority commit business changes and `security_invalidation_outbox` in the same DB transaction. A single recording worker writes and verifies external objects in sequence order before marking recording complete. Retry by event_id; halt with an operational error if the same sequence has different contents.
+- After confirming external object durability, write the latest checkpoint including the previous sequence and digest to independent storage. Success responses, new credential delivery, and publication of the change's status lists/key metadata require checkpoint confirmation. If the worker stops before updating the DB, confirm the same object/checkpoint on retry. Publication workers must not deploy DB snapshots containing unconfirmed changes.
+- If external storage fails, do not roll back committed DB changes; return an operation identifier and 202. Immediately reject old authority in the operational DB, and block new authority/credential receipt until recording completes. Idempotent retries retrieve the existing operation. During recording delays, stop reissuing affected status lists/key metadata so external verifiers reject them under the 120-second freshness rule. Alert that the 30-second publication target is unmet during this failure.
+- Bind retry idempotency keys to the target NOMA identity, operation type, and normalized request hash; reject different contents under the same key with 409. Authenticate polling with a random 32-byte token and store only its hash. The client generates the token before the initial request and sends it in a header so polling remains possible after response loss. Polling returns status only and grants no new authentication authority. Invalidate polling tokens 24 hours after completion and clean up completed outbox records after seven days. Never automatically delete incomplete operations.
+- RPO 0 is not guaranteed if both the DB and independent store are lost. Unacknowledged operations may be missing after restoration; users must not treat pending operations as complete. Replay externally recorded operations regardless of response loss.
 
-복원은 외부 접근 및 상태/키 재발행을 중단한 상태에서 진행한다. 정상 백업 복원 → 별도 저장소의 최신 체크포인트와 sequence/digest 연속성 확인 → 보존된 무효화 기록 재적용 → 정리 및 새 상태/키 메타데이터 게시 → 서비스 개방 순서다.
+Restore with external access and status/key reissuance stopped: restore a healthy backup → confirm the independent store's latest checkpoint and sequence/digest continuity → replay retained invalidations → clean up and publish new status/key metadata → reopen service.
 
-- 백업에 없는 NOMA의 폐기는 기록으로 tombstone을 생성한다. 없는 증명서의 폐기도 상태 슬롯에 반영한다. 기록상 폐기된 키·패스키·복구 코드는 백업에 존재하면 무효화하고 없어도 재사용을 금지한다. 보존 중인 폐기 슬롯은 재할당하지 않는다.
-- 복구 또는 키 교체 기록의 event_id가 복원된 DB에 없으면 새 인증 수단의 커밋을 확인할 수 없는 것으로 판단한다. 해당 NOMA의 내부 `restore_locked_at`을 설정해 일반 관리·복구·증명서 발급/수령을 차단하고 새 발급 안내를 제공한다. 공개 데이터의 status는 active/revoked 구조를 유지한다. 이 잠금은 일반 API로 해제하지 않으며, 잃은 새 비밀을 운영자가 재생성하거나 수동 본인 확인으로 복구하지 않는다. 이미 기록된 event_id는 외부 체크포인트와 대조해 outbox의 기록 완료 상태를 복원하며 중복 기록하지 않는다.
-- 모든 관리·복구 세션, challenge, 발급 intent/result 토큰, 수령 토큰은 복원 시 무효화한다. 인증 없는 오래된 발급 작업 재개를 허용하지 않는다.
-- 복원 시 확인 가능한 모든 기존 상태 목록 ID의 슬롯을 폐기 값으로 게시하고 남아 있는 활성 증명서를 폐기한다. 백업·기록에 없는 list_id 요청은 404/410으로 거부하며 목록을 자동 생성하지 않는다. 새 발급은 새 list_id만 사용한다. 이는 백업에 없던 발급 건과 슬롯 할당을 알 수 없어도 기존 증명서가 유효해지는 것을 막는다. 지갑에는 증명서 재발급이 필요함을 안내한다.
-- 최신 체크포인트를 확보할 수 없거나 기록 누락·변조·보존 기간 위반을 확인하면 관리·발급·인증과 상태/키 재발행을 재개하지 않는다. 복원 검증의 완료 시각·체크포인트·결과만 운영 기록으로 남긴다. 고정 복구 시간(RTO)은 아직 약속하지 않으며 출시 전 복구 훈련에서 측정한다.
+- Create tombstones from records for revoked NOMA identities missing from the backup. Apply revoked status slots even for missing credentials. Invalidate recorded keys, passkeys, and recovery codes present in the backup and prohibit reuse even if absent. Never reassign slots with retained revocations.
+- If a recovery or key replacement event_id is absent from the restored DB, treat the new authentication commit as unconfirmed. Set the identity's internal `restore_locked_at` to block ordinary management, recovery, credential issuance, and receipt; guide the user to create a new identity. Public status retains the active/revoked structure. Ordinary APIs cannot clear this lock. Operators must not regenerate lost secrets or perform manual identity-based recovery. Compare recorded event_ids with external checkpoints to restore outbox recording status without duplicate recording.
+- Invalidate all management/recovery sessions, challenges, issuance intent/result tokens, and receipt tokens during restoration. Do not resume old issuance operations without authentication.
+- Publish revoked values for every slot in all identifiable old status lists and revoke remaining active credentials. Reject requests for list_ids absent from backups/records with 404/410; never create those lists automatically. New issuance uses new list_ids only. This prevents unknown post-backup credentials and slot allocations from becoming valid. Tell wallets that credentials need reissuance.
+- Do not resume management, issuance, authentication, or status/key reissuance if the latest checkpoint is unavailable, records are missing/tampered with, or retention rules were violated. Operational records contain only restoration verification completion time, checkpoint, and result. No fixed recovery time objective (RTO) is promised yet; measure it in pre-launch recovery drills.
 
-## 10. 화면·접근성·디자인 토큰
+## 10. Screens, Accessibility, and Design Tokens
 
-### 10.1 화면 흐름
+### 10.1 Screen Flow
 
-- 홈 → 입력 및 미리보기 → 공개 내용 확인 → 패스키·소유키·복구 설정 → 발급 처리 → 완료.
-- PC 발급 화면은 선택된 시안처럼 좌측 탐색, 중앙 입력, 우측 세로 카드.
-- 모바일은 상단 간단 탐색, 카드 미리보기 접기/펼치기, 입력 순서로 한 열 구성.
-- 내 NOMA는 개인정보, 증명서, 인증·복구 영역으로 구성한다.
-- 공개 조회는 정확한 noma_id만 지원한다. 목록·이름 검색은 제공하지 않는다.
-- 지갑 승인 화면은 서비스의 검증된 도메인, 요청 항목, 선택 NOMA, 승인·거절을 표시한다.
-- 관리와 소유 인증을 사용자의 화면에서 각각 “NOMA 관리”, “외부 제출 승인”으로 표현한다.
+- Home → input and preview → public information review → passkey/holder key/recovery setup → issuance processing → completion.
+- Desktop issuance follows the selected concept: navigation on the left, inputs in the center, vertical card on the right.
+- Mobile uses simple top navigation, a collapsible card preview, and inputs in a single column.
+- My NOMA has profile, credential, and authentication/recovery sections.
+- Public lookup accepts an exact noma_id only. No listings or name search.
+- Wallet approval displays the service's validated domain, requested fields, selected identity, and approve/reject actions.
+- Label management authentication and holder authentication as “NOMA management” and “External presentation approval” respectively.
 
-### 10.2 상태 및 문구
+### 10.2 States and Copy
 
-- 입력: 이름 필수 / 출생년도·사진·이메일 선택.
-- 이메일 도움말: “가상 정보이며 실제 수신 여부를 확인하지 않습니다.”
-- 공개 확인: “발급한 이름, 출생년도, 사진, 이메일은 NOMA ID로 누구나 조회할 수 있습니다.”
-- 복구 안내: “복구 코드는 NOMA 관리 권한을 가진 비밀입니다. 증명서와 함께 공유하지 마세요.”
-- 미발급 카드 ID: “발급 후 생성”.
-- 제출: “이 서비스에 NOMA 정보를 제출할까요?”
-- 증명서 상태: 유효 / 갱신 필요 / 만료 / 폐기.
-- 입력 오류, 처리 중, 네트워크 실패·재시도, 인증 취소, 충돌, 빈 사진, 복구 실패, 상태 확인 불가를 별도 상태로 구현한다.
-- 유효한 증명서가 없으면 외부 제출을 막고 사용자 요청에 따라 발급·갱신 화면으로 안내한다.
+The following English text is the baseline product copy for v1. Use English throughout the issuer application and wallet, including validation, consent, recovery, and accessibility text. NOMA targets a global audience; the original concept's Korean text does not determine the implementation language.
 
-### 10.3 토큰
+- Input: name required; birth year, photo, and email optional.
+- Email help: “Fictional information; actual email deliverability is not checked.”
+- Public review: “Anyone can look up your issued name, birth year, photo, and email using your NOMA ID.”
+- Recovery notice: “Your recovery code is a secret that grants NOMA management access. Do not share it with your credential.”
+- Unissued card ID: “Generated after issuance”.
+- Presentation: “Submit your NOMA information to this service?”
+- Credential states: valid / renewal required / expired / revoked.
+- Implement separate states for input errors, processing, network failures/retries, authentication cancellation, conflicts, missing photos, recovery failures, and unavailable status checks.
+- Block external presentation without a valid credential and guide users to issuance/renewal when they request it.
 
-| 토큰 | 값 |
+### 10.3 Tokens
+
+| Token | Value |
 | --- | --- |
 | background | #101112 |
 | surface | #191B1D |
 | surface-raised | #24272A |
-| divider | #4B5055 — 장식용 구분선 |
-| control-border | #727980 — 입력 등 의미 있는 UI 경계 |
+| divider | #4B5055 — decorative dividers |
+| control-border | #727980 — meaningful UI boundaries such as inputs |
 | text-primary | #F1F3F4 |
 | text-secondary | #B4BAC0 |
 | accent | #C8FF32 |
 | accent-text | #101112 |
 | danger | #FF8A8A |
-| 본문 | Pretendard Variable, 16px, line-height 1.5 |
-| 기술 표시 | IBM Plex Mono, 14px |
-| 모서리 | 기본 0px, 입력·버튼 최대 2px |
-| 간격 | 4/8/12/16/24/32/48/64px |
-| 최대 콘텐츠 너비 | 1440px |
-| breakpoint | 모바일 <768px, 태블릿 768~1199px, PC >=1200px |
+| Body text | Pretendard Variable, 16px, line-height 1.5 |
+| Technical text | IBM Plex Mono, 14px |
+| Corners | Default 0px; inputs/buttons at most 2px |
+| Spacing | 4/8/12/16/24/32/48/64px |
+| Maximum content width | 1440px |
+| breakpoint | Mobile <768px, tablet 768–1199px, desktop >=1200px |
 
-폰트는 라이선스를 함께 보관하여 자체 호스팅한다. 본문 위 금속 texture opacity는 최대 3%, 그라데이션·네온 glow는 금지한다. 강조색은 주요 행동·선택 상태에 사용한다.
+Self-host fonts with their licenses. Metallic texture behind body text has at most 3% opacity. Gradients and neon glow are prohibited. Use accent colors for primary actions and selected states.
 
-접근성 목표는 WCAG 2.2 AA. 일반 텍스트 대비 4.5:1, 큰 글자·의미 있는 UI 경계 3:1을 확인한다. 키보드 조작, 명시적 label, 색상 외 상태 표시, 2px focus ring, 44×44px 권장 터치 영역, reduced-motion을 지원한다. 수정된 오류로 포커스를 유도하고 서버 검증 오류도 항목에 연결한다.
+Use system sans-serif fallbacks for scripts not covered by the bundled body font. Keep technical identifiers in monospace; do not force arbitrary user names into a font that cannot display their script.
 
-## 11. 스키마와 구현 검증
+Target WCAG 2.2 AA. Check 4.5:1 contrast for normal text and 3:1 for large text and meaningful UI boundaries. Support keyboard operation, explicit labels, non-color state indicators, a 2px focus ring, recommended 44×44px touch targets, and reduced-motion. Guide focus to errors that need correction and associate server validation errors with their fields.
 
-물리 스키마는 `schema.mysql.sql`을 기준으로 한다. 이 파일은 새 데이터베이스용 초기 DDL이며 기존 DB에 무조건 적용하지 않는다. 삭제·인증 수명 주기·정규화·서명 검증 등은 DDL만으로 해결되지 않으므로 서비스 로직과 통합 검증이 필요하다.
+### 10.4 Language and International Formatting
 
-구현 완료 판정에는 다음을 포함한다.
+- v1 ships English only, with document language `en` and left-to-right interface layout. Apply the same language to the issuer application, wallet, public lookup, developer documentation, page metadata, accessible names, and status/error messages. Do not show a language selector until additional translations are available.
+- Keep interface strings in shared message catalogs or equivalent locale resources rather than embedding them in business logic. English is the fallback for future locales. Browser language does not automatically switch v1 copy to another language.
+- Preserve Unicode names and emails under Section 3 rules. Do not transliterate, translate, or require ASCII-only profile values. Isolate user-supplied text from surrounding layout with automatic text direction so mixed-direction names do not reorder adjacent labels or IDs. This does not relax control-character validation.
+- Format human-facing dates and numbers with an English locale. Use the browser's resolved time zone for displayed timestamps and show the time zone, including its UTC offset at that instant. Fall back to UTC if the zone is unavailable. Use month names rather than ambiguous numeric-only dates, and make the exact UTC ISO 8601 value available in details or a copy action.
+- Keep API/credential timestamps, signature inputs, UUIDs, protocol numbers, and birth_year values independent of locale. A birth year is an integer, not a date subject to time-zone conversion. Use UTC for all expiry and freshness checks.
+- Do not request country, nationality, or real-world location to choose a display language or time zone. Resolve display settings locally in the browser; do not add server profile fields or infer a user's identity from them.
+- Later translations must cover complete flows, including errors, recovery warnings, approval details, and accessible text, before being offered. When adding languages, verify text expansion and right-to-left layouts where applicable; v1 only needs mixed-direction user content within its English layout.
 
-- MySQL 8.4에서 초기 DDL 및 트랜잭션·동시 수정·중복 발급 검증.
-- 변조 증명서, 다른 소유키, 다른 대상, 만료·재사용 nonce, 세션 바꿔치기 거부.
-- x509 체인·호스트·요청 서명·응답 암호화 검증.
-- 폐기 상태와 갱신·키 교체·복구 후 과거 증명서 거부.
-- 개인정보 원문·토큰·이용처·복구 비밀이 서버 로그로 넘어가지 않는지 확인.
-- 브라우저 키 저장·저장소 삭제·복구 및 PC/모바일 승인 흐름 검증.
-- 공개 규격에 맞춘 별도 외부 검증 데모로 상호운용 확인.
-- 수령 토큰 만료·다른 소유키·다른 증명서·동시 재사용 거부, 응답 유실·IndexedDB 저장 실패 후 동일 증명서 재수령, 잘못된 postMessage origin/source/nonce 거부.
-- 패스키 없는 복구 성공, 제한 복구 세션의 일반 관리/다운로드 거부, 같은 코드의 동시 복구 중 단 한 건 완료 및 기존 인증 수단 무효화.
-- 외부 무효화 기록 저장 실패·커밋 직후 중단·체크포인트 직후 중단에서 성공/게시 차단과 재시도 확인. 7일 전 백업 복원 후 폐기 NOMA·키·패스키·복구 코드와 모든 기존 증명서의 재활성화 거부.
-- 기록 누락·변조·최신 체크포인트 불명 시 재개 차단, 백업 이후 새 인증 수단 유실 시 잠금, 상태 목록 ID 교체와 증명서 재발급 및 RPO/RTO 복구 훈련 결과 확인.
+## 11. Schema and Implementation Verification
 
-구현 전에 필요한 제품·기술 선택은 이 문서로 정했다. 실제 도메인·호스팅 공급자·배포 비밀 값은 실행 시 주입할 설정이며 미정 제품 요구사항으로 취급하지 않는다.
+The physical schema follows `schema.mysql.sql`. It is initial DDL for a new database, not something to apply indiscriminately to existing databases. DDL alone cannot handle deletion, authentication lifecycles, normalization, or signature verification; service logic and integration verification are required.
 
-## 12. 확인한 공식 자료
+Implementation completion includes:
+
+- Execute initial DDL on MySQL 8.4 and verify transactions, concurrent changes, and duplicate issuance.
+- Reject tampered credentials, different holder keys/audiences, expired/reused nonces, and session substitution.
+- Verify x509 chains, hosts, request signatures, and response encryption.
+- Reject revoked and old credentials after renewal, key replacement, and recovery.
+- Confirm that profile contents, tokens, usage destinations, and recovery secrets never reach server logs.
+- Verify browser key storage, storage deletion, recovery, and desktop/mobile approval flows.
+- Confirm interoperability through a separate external verifier demo following the public specification.
+- Reject expired receipt tokens, different holder keys/credentials, concurrent reuse, and invalid postMessage origin/source/nonce. Verify receipt of the same credential after response loss or IndexedDB storage failure.
+- Verify recovery without a passkey, rejection of ordinary management/downloads in restricted recovery sessions, exactly one concurrent completion per recovery code, and invalidation of old authentication methods.
+- Verify success/publication blocking and retries on external invalidation storage failure, interruption immediately after commit, and interruption immediately after checkpointing. Restore a seven-day-old backup and reject reactivation of revoked identities, keys, passkeys, recovery codes, and all old credentials.
+- Verify reopening prevention for missing/tampered records or unknown latest checkpoints, locking after loss of post-backup authentication methods, status list ID replacement, credential reissuance, and RPO/RTO recovery drill results.
+- Verify English labels, validation errors, consent/recovery notices, accessible names, and page metadata across issuer and wallet flows. Check Unicode and mixed-direction names, multiple browser time zones and daylight-saving transitions, UTC fallback, and unchanged API/credential timestamps and expiry checks.
+
+This document resolves product and technical choices needed before implementation. Actual domains, hosting providers, and deployment secrets are injected configuration, not unresolved product requirements.
+
+## 12. Official Sources Consulted
 
 - [Next.js 16](https://nextjs.org/blog/next-16)
-- [Node.js 릴리스 일정](https://github.com/nodejs/Release/blob/main/README.md)
+- [Node.js Release Schedule](https://github.com/nodejs/Release/blob/main/README.md)
 - [MySQL 8.4 LTS](https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html)
 - [OpenID4VP 1.0 Final](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html)
 - [SD-JWT — RFC 9901](https://www.rfc-editor.org/rfc/rfc9901.html)
