@@ -1,45 +1,47 @@
-# NOMA / 노마
+# NOMA
 
-현실 신원을 필수로 요구하지 않고 가상 개인정보를 생성·발급·관리하는 독립적인 시스템입니다. 사용자는 가상 개인과 고유 등록번호(`noma_id`)를 만들고, 외부 서비스는 공개 규격으로 정보를 조회하거나 증명서와 소유 증명을 검증할 수 있습니다.
+An independent system for creating, issuing, and managing fictional personal information without requiring a real-world identity. Users create fictional identities with unique registration numbers (`noma_id`). External services can use the public specifications to look up information or verify credentials and proof of possession.
 
-## 현재 상태
+NOMA targets a global audience. English is the default and the only shipped UI language in v1 across the issuer application, wallet, and developer documentation. Profile names continue to support Unicode; an English interface does not restrict users to English names.
 
-**v1 요구사항과 구현 설계를 정리한 단계입니다.** 현재 저장소에는 문서, MySQL 초기 DDL, 디자인 기준 이미지가 있습니다. 애플리케이션 코드·설치 스크립트·실행 가능한 개발 환경은 아직 없으며, DDL 실행·배포·표준 상호운용 검증도 완료하지 않았습니다.
+## Current Status
 
-## 문서 읽기
+**The v1 requirements and implementation design are documented.** This repository currently contains documentation, an initial MySQL DDL, and a design reference image. Application code, installation scripts, and a runnable development environment are not yet available. DDL execution, deployment, and standards interoperability have not been verified.
 
-| 문서 | 내용 |
+## Documentation
+
+| Document | Contents |
 | --- | --- |
-| [요구사항 및 설계 기준](REQUIREMENTS.md) | 제품 목적, 공개 데이터 구조, 발급·관리 흐름, 디자인과 범위 |
-| [v1 구현 결정서](docs/V1-DECISIONS.md) | 기술 선택, 인증·복구, 증명서·제출, API, 운영·복원, 구현 완료 기준 |
-| [MySQL 초기 DDL](docs/schema.mysql.sql) | 테이블·관계·제약 및 서비스 로직으로 검증할 불변 조건 |
-| [다크 터미널 디자인 시안](docs/assets/noma-dark-terminal-concept.png) | 선택된 화면의 시각적 기준 |
-| [기여 및 저장소 작업 안내](CONTRIBUTING.md) | 브랜치·커밋 규칙, 문서 수정과 검증 방법 |
+| [Requirements and Design Guidelines](REQUIREMENTS.md) | Product purpose, public data structure, issuance and management flows, design, and scope |
+| [v1 Implementation Decisions](docs/V1-DECISIONS.md) | Technology choices, authentication and recovery, credentials and presentations, APIs, operations and restoration, completion criteria |
+| [Initial MySQL DDL](docs/schema.mysql.sql) | Tables, relationships, constraints, and invariants enforced by service logic |
+| [Dark Terminal Design Concept](docs/assets/noma-dark-terminal-concept.png) | Visual reference for the selected design |
+| [Contributing and Repository Workflow](CONTRIBUTING.md) | Branch and commit conventions, documentation changes, and validation |
 
-처음에는 요구사항을 읽고, 구현에 필요한 세부 사항은 결정서와 DDL을 함께 확인하세요. 제품 동작은 문서를 따르며, 시안의 예시 문구·장식이 요구사항을 대체하지 않습니다. 문서 사이에 충돌이 있으면 변경 과정에서 함께 해결합니다.
+Start with the requirements, then read the decisions and DDL together for implementation details. Product behavior follows the documentation; example copy and decoration in the concept image do not replace requirements. Resolve inconsistencies between documents as part of any change.
 
-## 핵심 원칙
+## Core Principles
 
-- 공개 데이터는 이름·출생년도·사진·이메일의 고정 구조입니다. 이름은 필수이며 나머지는 선택입니다. 내용이 현실의 사실임을 보증하지 않습니다.
-- 발급한 정보는 정확한 `noma_id`로 누구나 조회할 수 있습니다. 선택 공개 증명서가 이 공개 조회를 비공개로 바꾸지는 않습니다.
-- 관리 패스키와 외부 제출용 소유키는 별개입니다. 증명서 파일만 가지고 있다고 소유자로 인정하지 않습니다.
-- 지갑은 외부 검증자와 직접 통신합니다. 발급 시스템은 외부 서비스 등록·사용처 목록·제출 기록을 관리하지 않습니다.
-- 동일 ID를 여러 서비스에 공개하면 활동이 연결될 수 있습니다. 절대적 익명성·현실 연령 증명·한 사람당 하나의 신원은 보장하지 않습니다.
-- SNS, 이름 검색, 전체 등록자 목록, 임의 개인정보 필드는 v1 범위에서 제외합니다.
+- Public profiles have a fixed structure: name, birth year, photo, and email. Name is required; the other fields are optional. Their real-world truth is not guaranteed.
+- Anyone can retrieve issued information using an exact `noma_id`. Selective disclosure credentials do not make public lookup private.
+- Management passkeys and holder keys for external presentations are separate. Possessing a credential file alone does not establish ownership.
+- Wallets communicate directly with external verifiers. The issuing system does not maintain external service registrations, usage destinations, or presentation histories.
+- Reusing an ID across services can allow activity correlation. NOMA does not guarantee absolute anonymity, proof of actual age, or one identity per person.
+- Social networks, name search, complete identity listings, and arbitrary profile fields are outside v1 scope.
 
-## 설계한 구성
+## Planned Architecture
 
-| 구성 | 역할 | v1 기술 선택 |
+| Component | Responsibilities | v1 technology choice |
 | --- | --- | --- |
-| 발급·관리 웹앱 | 프로필 관리, 패스키 인증, 발급 API 및 공개 조회 | Next.js 16, TypeScript, Node.js 24 LTS |
-| 사용자 지갑 | 소유키 생성·보관, 증명서 저장, 외부 제출 승인 | 별도 origin의 React + Vite PWA |
-| 데이터베이스 | 고정 스키마와 인증·증명서 메타데이터 | MySQL 8.4 LTS, mysql2 |
-| 사진 저장소 | 재인코딩한 사진 자산 | S3 호환 저장소, 개발 시 MinIO |
-| 배포 | HTTPS 및 컨테이너 실행 | Linux, Docker Compose, Caddy |
+| Issuance and management application | Profile management, passkey authentication, issuance APIs, public lookup | Next.js 16, TypeScript, Node.js 24 LTS |
+| User wallet | Holder key generation and storage, credential storage, presentation approval | React + Vite PWA on a separate origin |
+| Database | Fixed schema and authentication/credential metadata | MySQL 8.4 LTS, mysql2 |
+| Photo storage | Re-encoded photo assets | S3-compatible storage; MinIO for development |
+| Deployment | HTTPS and container execution | Linux, Docker Compose, Caddy |
 
-증명서·제출 규격의 고정 버전과 검증 조건은 [결정서 5절](docs/V1-DECISIONS.md#5-증명서와-openid4vp-프로필)을 따릅니다. 이 표는 구현 계획이며 설치되거나 동작 중인 구성 목록은 아닙니다.
+Pinned credential and presentation specifications and verification conditions follow [Section 5 of the decisions](docs/V1-DECISIONS.md#5-credentials-and-openid4vp-profile). This table describes implementation plans, not installed or running components.
 
-## 저장소 구조
+## Repository Structure
 
 ```text
 .
@@ -53,11 +55,11 @@
         └── noma-dark-terminal-concept.png
 ```
 
-## 구현을 시작할 때
+## Starting Implementation
 
-1. 결정서를 기준으로 발급 웹앱·별도 지갑·개발 인프라를 구성하고 의존성 버전을 고정합니다.
-2. 초기 DDL은 빈 개발 DB에서 마이그레이션으로 검증합니다. 기존 DB에 그대로 적용하지 않습니다.
-3. 발급·지갑 수령·관리·복구와 상태 게시를 구현하고, 실패·동시 요청·재시도를 검증합니다.
-4. 외부 검증 데모와 백업 복구 훈련을 포함한 [구현 완료 기준](docs/V1-DECISIONS.md#11-스키마와-구현-검증)을 충족합니다.
+1. Set up the issuer application, separate wallet, and development infrastructure from the decisions, and pin dependency versions.
+2. Validate the initial DDL as a migration against an empty development database. Do not apply it unchanged to an existing database.
+3. Implement issuance, wallet receipt, management, recovery, and status publication; verify failures, concurrent requests, and retries.
+4. Meet the [implementation completion criteria](docs/V1-DECISIONS.md#11-schema-and-implementation-verification), including an external verification demo and backup recovery drills.
 
-실행 명령과 환경 변수 목록은 실제 개발 환경을 구성한 뒤 추가합니다. 개인키·복구 코드·운영 토큰 등 비밀 값은 저장소에 커밋하지 않습니다.
+Add run commands and environment variable documentation once the development environment exists. Never commit private keys, recovery codes, production tokens, or other secrets.
