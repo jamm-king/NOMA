@@ -17,6 +17,7 @@ NOMA targets a global audience. English is the default and the only shipped UI l
 | [Initial MySQL DDL](docs/schema.mysql.sql) | Tables, relationships, constraints, and invariants enforced by service logic |
 | [Dark Terminal Design Concept](docs/assets/noma-dark-terminal-concept.png) | Visual reference for the selected design |
 | [Contributing and Repository Workflow](CONTRIBUTING.md) | Branch and commit conventions, documentation changes, and validation |
+| [Agent Guidelines](AGENTS.md) | Hexagonal architecture, class-level tests, branch reuse, and commit/push authorization |
 
 Start with the requirements, then read the decisions and DDL together for implementation details. Product behavior follows the documentation; example copy and decoration in the concept image do not replace requirements. Resolve inconsistencies between documents as part of any change.
 
@@ -47,6 +48,7 @@ Pinned credential and presentation specifications and verification conditions fo
 .
 ├── README.md
 ├── CONTRIBUTING.md
+├── AGENTS.md
 ├── REQUIREMENTS.md
 └── docs/
     ├── V1-DECISIONS.md

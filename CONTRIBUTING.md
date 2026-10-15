@@ -2,9 +2,11 @@
 
 NOMA is currently at the requirements and implementation design stage. Documentation changes must not imply that implementation, execution, or verification is complete.
 
+Automated contributors also follow [AGENTS.md](AGENTS.md) for architecture, class-level tests, branch selection, and commit/push authorization.
+
 ## Branches
 
-Create a branch from `main` for the purpose of the change. Use lowercase English words and hyphens.
+Continue related work on its existing task branch even when the working tree is clean. A clean working tree alone is not a reason to create a new branch. For a new, unrelated task with no uncommitted changes, update `main` using fast-forward-only synchronization and create a new task branch. Do not work directly on `main`; checking it out to update it is allowed. Preserve unrelated uncommitted changes rather than automatically stashing or discarding them. Use lowercase English words and hyphens in branch names.
 
 | Prefix | Purpose | Example |
 | --- | --- | --- |
@@ -13,7 +15,7 @@ Create a branch from `main` for the purpose of the change. Use lowercase English
 | `fix/` | Bug fixes | `fix/receipt-token-expiry` |
 | `chore/` | Tools, configuration, and maintenance | `chore/dev-environment` |
 
-Example documentation workflow:
+Example workflow for a new, unrelated documentation task with a clean working tree:
 
 ```sh
 git switch main
@@ -35,6 +37,8 @@ Use Conventional Commits to describe the purpose of a change. Branch prefixes ar
 - `refactor`: Structural changes that preserve behavior
 - `test`: Verification code changes
 - `chore`: Tools, configuration, and maintenance
+
+Commits within the requested task scope do not require prior user approval. Review and stage only task-related changes after appropriate verification. Every push requires separate, explicit user approval for the intended remote, branch, and changes.
 
 Examples:
 
@@ -79,11 +83,12 @@ When DDL or service behavior changes, documentation review alone does not comple
 
 ## Pushing and Describing Changes
 
-Explicitly stage reviewed files, commit using Conventional Commits, and push the working branch.
+Explicitly stage reviewed files and commit using Conventional Commits. Push the working branch only after explicit user approval. Committing or completing a task does not grant permission to push.
 
 ```sh
 git add README.md CONTRIBUTING.md
 git commit -m "docs(repo): add repository overview and contribution guide"
+# Run only after explicit user approval of the push:
 git push -u origin docs/your-topic
 ```
 
